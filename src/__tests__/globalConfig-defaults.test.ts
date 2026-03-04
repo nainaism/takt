@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
@@ -20,7 +20,11 @@ vi.mock('node:os', async () => {
 });
 
 // Import after mocks are set up
-const { loadGlobalConfig, saveGlobalConfig, invalidateGlobalConfigCache } = await import('../infra/config/global/globalConfig.js');
+const {
+  loadGlobalConfig,
+  saveGlobalConfig,
+  invalidateGlobalConfigCache,
+} = await import('../infra/config/global/globalConfig.js');
 const { getGlobalConfigPath } = await import('../infra/config/paths.js');
 
 describe('loadGlobalConfig', () => {
@@ -39,11 +43,87 @@ describe('loadGlobalConfig', () => {
     const config = loadGlobalConfig();
 
     expect(config.language).toBe('en');
-    expect(config.logLevel).toBe('info');
     expect(config.provider).toBe('claude');
     expect(config.model).toBeUndefined();
-    expect(config.verbose).toBe(false);
-    expect(config.pipeline).toBeUndefined();
+  });
+
+  it('should not expose migrated project-local fields from global config', () => {
+    const config = loadGlobalConfig() as Record<string, unknown>;
+
+    expect(config).not.toHaveProperty('logLevel');
+    expect(config).not.toHaveProperty('pipeline');
+    expect(config).not.toHaveProperty('personaProviders');
+    expect(config).not.toHaveProperty('branchNameStrategy');
+    expect(config).not.toHaveProperty('minimalOutput');
+    expect(config).not.toHaveProperty('concurrency');
+    expect(config).not.toHaveProperty('taskPollIntervalMs');
+    expect(config).not.toHaveProperty('interactivePreviewMovements');
+    expect(config).not.toHaveProperty('verbose');
+  });
+
+  it('should accept migrated project-local keys in global config.yaml for resolver fallback', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'log_level: debug',
+        'pipeline:',
+        '  default_branch_prefix: "global/"',
+        'persona_providers:',
+        '  coder:',
+        '    provider: codex',
+        'branch_name_strategy: ai',
+        'minimal_output: true',
+        'concurrency: 3',
+        'task_poll_interval_ms: 1000',
+        'interactive_preview_movements: 2',
+        'verbose: true',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(() => loadGlobalConfig()).not.toThrow();
+    const config = loadGlobalConfig() as Record<string, unknown>;
+    expect(config).not.toHaveProperty('logLevel');
+    expect(config).not.toHaveProperty('pipeline');
+    expect(config).not.toHaveProperty('personaProviders');
+    expect(config).not.toHaveProperty('branchNameStrategy');
+    expect(config).not.toHaveProperty('minimalOutput');
+    expect(config).not.toHaveProperty('concurrency');
+    expect(config).not.toHaveProperty('taskPollIntervalMs');
+    expect(config).not.toHaveProperty('interactivePreviewMovements');
+    expect(config).not.toHaveProperty('verbose');
+  });
+
+  it('should not persist migrated project-local keys when saving global config', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig() as Record<string, unknown>;
+    config.logLevel = 'debug';
+    config.pipeline = { defaultBranchPrefix: 'global/' };
+    config.personaProviders = { coder: { provider: 'codex' } };
+    config.branchNameStrategy = 'ai';
+    config.minimalOutput = true;
+    config.concurrency = 4;
+    config.taskPollIntervalMs = 1200;
+    config.interactivePreviewMovements = 1;
+    config.verbose = true;
+    saveGlobalConfig(config as Parameters<typeof saveGlobalConfig>[0]);
+
+    const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
+    expect(raw).not.toContain('log_level:');
+    expect(raw).not.toContain('pipeline:');
+    expect(raw).not.toContain('persona_providers:');
+    expect(raw).not.toContain('branch_name_strategy:');
+    expect(raw).not.toContain('minimal_output:');
+    expect(raw).not.toContain('concurrency:');
+    expect(raw).not.toContain('task_poll_interval_ms:');
+    expect(raw).not.toContain('interactive_preview_movements:');
+    expect(raw).not.toContain('verbose:');
   });
 
   it('should return the same cached object on subsequent calls', () => {
@@ -67,7 +147,7 @@ describe('loadGlobalConfig', () => {
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
       getGlobalConfigPath(),
-      'language: ja\nprovider: codex\nlog_level: debug\n',
+      'language: ja\nprovider: codex\n',
       'utf-8',
     );
 
@@ -75,7 +155,7 @@ describe('loadGlobalConfig', () => {
 
     expect(config.language).toBe('ja');
     expect(config.provider).toBe('codex');
-    expect(config.logLevel).toBe('debug');
+    expect((config as Record<string, unknown>).logLevel).toBeUndefined();
   });
 
   it('should load provider block from config.yaml and normalize model/providerOptions', () => {
@@ -101,28 +181,69 @@ describe('loadGlobalConfig', () => {
     });
   });
 
-  it('should load persona_providers provider block and normalize to provider/model', () => {
+  it('should preserve provider_options when saveGlobalConfig is called with loaded config', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
       getGlobalConfigPath(),
       [
-        'persona_providers:',
-        '  coder:',
-        '    type: opencode',
-        '    model: openai/gpt-5',
+        'language: en',
+        'provider: claude',
+        'provider_options:',
+        '  codex:',
+        '    network_access: true',
+        '  opencode:',
+        '    network_access: false',
+        '  claude:',
+        '    sandbox:',
+        '      allow_unsandboxed_commands: true',
+        '      excluded_commands:',
+        '        - git push',
       ].join('\n'),
       'utf-8',
     );
 
-    const config = loadGlobalConfig();
+    const loaded = loadGlobalConfig();
+    saveGlobalConfig(loaded);
+    invalidateGlobalConfigCache();
 
-    expect(config.personaProviders).toEqual({
-      coder: {
-        provider: 'opencode',
-        model: 'openai/gpt-5',
+    const reloaded = loadGlobalConfig();
+    expect(reloaded.providerOptions).toEqual({
+      codex: { networkAccess: true },
+      opencode: { networkAccess: false },
+      claude: {
+        sandbox: {
+          allowUnsandboxedCommands: true,
+          excludedCommands: ['git push'],
+        },
       },
     });
+    const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
+    expect(raw).toContain('provider_options:');
+  });
+
+  it('should round-trip copilot global fields', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'copilot_cli_path: /tmp/copilot',
+        'copilot_github_token: ghp_test_token',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const loaded = loadGlobalConfig();
+    expect(loaded.copilotCliPath).toBe('/tmp/copilot');
+    expect(loaded.copilotGithubToken).toBe('ghp_test_token');
+
+    saveGlobalConfig(loaded);
+    invalidateGlobalConfigCache();
+    const reloaded = loadGlobalConfig();
+    expect(reloaded.copilotCliPath).toBe('/tmp/copilot');
+    expect(reloaded.copilotGithubToken).toBe('ghp_test_token');
   });
 
   it('should apply env override for nested provider_options key', () => {
@@ -142,7 +263,7 @@ describe('loadGlobalConfig', () => {
     }
   });
 
-  it('should load pipeline config from config.yaml', () => {
+  it('should accept pipeline in global config for migrated fallback', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
@@ -156,12 +277,9 @@ describe('loadGlobalConfig', () => {
       'utf-8',
     );
 
-    const config = loadGlobalConfig();
-
-    expect(config.pipeline).toBeDefined();
-    expect(config.pipeline!.defaultBranchPrefix).toBe('feat/');
-    expect(config.pipeline!.commitMessageTemplate).toBe('fix: {title} (#{issue})');
-    expect(config.pipeline!.prBodyTemplate).toBeUndefined();
+    expect(() => loadGlobalConfig()).not.toThrow();
+    const config = loadGlobalConfig() as Record<string, unknown>;
+    expect(config).not.toHaveProperty('pipeline');
   });
 
   it('should save and reload pipeline config', () => {
@@ -171,7 +289,7 @@ describe('loadGlobalConfig', () => {
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    config.pipeline = {
+    (config as Record<string, unknown>).pipeline = {
       defaultBranchPrefix: 'takt/',
       commitMessageTemplate: 'feat: {title} (#{issue})',
     };
@@ -179,9 +297,7 @@ describe('loadGlobalConfig', () => {
     invalidateGlobalConfigCache();
 
     const reloaded = loadGlobalConfig();
-    expect(reloaded.pipeline).toBeDefined();
-    expect(reloaded.pipeline!.defaultBranchPrefix).toBe('takt/');
-    expect(reloaded.pipeline!.commitMessageTemplate).toBe('feat: {title} (#{issue})');
+    expect((reloaded as Record<string, unknown>).pipeline).toBeUndefined();
   });
 
   it('should load auto_pr config from config.yaml', () => {
@@ -440,7 +556,7 @@ describe('loadGlobalConfig', () => {
     });
   });
 
-  it('should load interactive_preview_movements config from config.yaml', () => {
+  it('should accept interactive_preview_movements in global config for migrated fallback', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
@@ -449,8 +565,9 @@ describe('loadGlobalConfig', () => {
       'utf-8',
     );
 
-    const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(5);
+    expect(() => loadGlobalConfig()).not.toThrow();
+    const config = loadGlobalConfig() as Record<string, unknown>;
+    expect(config).not.toHaveProperty('interactivePreviewMovements');
   });
 
   it('should save and reload interactive_preview_movements config', () => {
@@ -459,12 +576,12 @@ describe('loadGlobalConfig', () => {
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    config.interactivePreviewMovements = 7;
+    (config as Record<string, unknown>).interactivePreviewMovements = 7;
     saveGlobalConfig(config);
     invalidateGlobalConfigCache();
 
     const reloaded = loadGlobalConfig();
-    expect(reloaded.interactivePreviewMovements).toBe(7);
+    expect((reloaded as Record<string, unknown>).interactivePreviewMovements).toBeUndefined();
   });
 
   it('should default interactive_preview_movements to 3', () => {
@@ -473,10 +590,10 @@ describe('loadGlobalConfig', () => {
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(3);
+    expect((config as Record<string, unknown>).interactivePreviewMovements).toBeUndefined();
   });
 
-  it('should accept interactive_preview_movements: 0 to disable', () => {
+  it('should accept interactive_preview_movements=0 in global config for migrated fallback', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
@@ -485,107 +602,13 @@ describe('loadGlobalConfig', () => {
       'utf-8',
     );
 
-    const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(0);
+    expect(() => loadGlobalConfig()).not.toThrow();
+    const config = loadGlobalConfig() as Record<string, unknown>;
+    expect(config).not.toHaveProperty('interactivePreviewMovements');
   });
 
   describe('persona_providers', () => {
-    it('should load persona_providers from config.yaml', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(
-        getGlobalConfigPath(),
-        [
-          'language: en',
-          'persona_providers:',
-          '  coder:',
-          '    provider: codex',
-          '  reviewer:',
-          '    provider: claude',
-          '    model: claude-3-5-sonnet-latest',
-        ].join('\n'),
-        'utf-8',
-      );
-
-      const config = loadGlobalConfig();
-
-      expect(config.personaProviders).toEqual({
-        coder: { provider: 'codex' },
-        reviewer: { provider: 'claude', model: 'claude-3-5-sonnet-latest' },
-      });
-    });
-
-    it('should load persona_providers with model only (no provider)', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(
-        getGlobalConfigPath(),
-        [
-          'language: en',
-          'persona_providers:',
-          '  coder:',
-          '    model: o3-mini',
-        ].join('\n'),
-        'utf-8',
-      );
-
-      const config = loadGlobalConfig();
-
-      expect(config.personaProviders).toEqual({
-        coder: { model: 'o3-mini' },
-      });
-    });
-
-    it('should save and reload persona_providers', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
-
-      const config = loadGlobalConfig();
-      config.personaProviders = { coder: { provider: 'codex', model: 'o3-mini' } };
-      saveGlobalConfig(config);
-      invalidateGlobalConfigCache();
-
-      const reloaded = loadGlobalConfig();
-      expect(reloaded.personaProviders).toEqual({ coder: { provider: 'codex', model: 'o3-mini' } });
-    });
-
-    it('should normalize legacy string format to object format', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(
-        getGlobalConfigPath(),
-        'language: en\npersona_providers:\n  coder: codex\n',
-        'utf-8',
-      );
-
-      const config = loadGlobalConfig();
-
-      expect(config.personaProviders).toEqual({
-        coder: { provider: 'codex' },
-      });
-    });
-
-    it('should have undefined personaProviders by default', () => {
-      const config = loadGlobalConfig();
-      expect(config.personaProviders).toBeUndefined();
-    });
-
-    it('should not save persona_providers when empty', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
-
-      const config = loadGlobalConfig();
-      config.personaProviders = {};
-      saveGlobalConfig(config);
-      invalidateGlobalConfigCache();
-
-      const reloaded = loadGlobalConfig();
-      expect(reloaded.personaProviders).toBeUndefined();
-    });
-
-    it('should throw when persona entry has codex provider with Claude model alias', () => {
+    it('should fail fast when persona_providers provider/model alias combination is invalid', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(
@@ -594,34 +617,10 @@ describe('loadGlobalConfig', () => {
         'utf-8',
       );
 
-      expect(() => loadGlobalConfig()).toThrow(/Claude model alias/);
+      expect(() => loadGlobalConfig()).toThrow();
     });
 
-    it('should throw when persona entry has opencode provider without model', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(
-        getGlobalConfigPath(),
-        'language: en\npersona_providers:\n  reviewer:\n    provider: opencode\n',
-        'utf-8',
-      );
-
-      expect(() => loadGlobalConfig()).toThrow(/requires model/);
-    });
-
-    it('should not throw when persona entry has opencode provider with compatible model', () => {
-      const taktDir = join(testHomeDir, '.takt');
-      mkdirSync(taktDir, { recursive: true });
-      writeFileSync(
-        getGlobalConfigPath(),
-        'language: en\npersona_providers:\n  coder:\n    provider: opencode\n    model: opencode/big-pickle\n',
-        'utf-8',
-      );
-
-      expect(() => loadGlobalConfig()).not.toThrow();
-    });
-
-    it('should throw when persona provider block includes provider options', () => {
+    it('should fail fast when persona provider block includes provider options', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(

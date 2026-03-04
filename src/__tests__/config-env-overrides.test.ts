@@ -26,13 +26,13 @@ describe('config env overrides', () => {
   });
 
   it('should apply global env overrides from generated env names', () => {
-    process.env.TAKT_LOG_LEVEL = 'debug';
+    process.env.TAKT_PROVIDER = 'codex';
     process.env.TAKT_PROVIDER_OPTIONS_CLAUDE_SANDBOX_ALLOW_UNSANDBOXED_COMMANDS = 'true';
 
     const raw: Record<string, unknown> = {};
     applyGlobalConfigEnvOverrides(raw);
 
-    expect(raw.log_level).toBe('debug');
+    expect(raw.provider).toBe('codex');
     expect(raw.provider_options).toEqual({
       claude: {
         sandbox: {
@@ -52,6 +52,8 @@ describe('config env overrides', () => {
   });
 
   it('should apply project env overrides from generated env names', () => {
+    process.env.TAKT_LOG_LEVEL = 'debug';
+    process.env.TAKT_MODEL = 'gpt-5';
     process.env.TAKT_VERBOSE = 'true';
     process.env.TAKT_CONCURRENCY = '3';
     process.env.TAKT_ANALYTICS_EVENTS_PATH = '/tmp/project-analytics';
@@ -59,6 +61,8 @@ describe('config env overrides', () => {
     const raw: Record<string, unknown> = {};
     applyProjectConfigEnvOverrides(raw);
 
+    expect(raw.log_level).toBe('debug');
+    expect(raw.model).toBe('gpt-5');
     expect(raw.verbose).toBe(true);
     expect(raw.concurrency).toBe(3);
     expect(raw.analytics).toEqual({
@@ -83,10 +87,18 @@ describe('config env overrides', () => {
 
   it('should apply cursor API key override for global config', () => {
     process.env.TAKT_CURSOR_API_KEY = 'cursor-key-from-env';
+    process.env.TAKT_GEMINI_API_KEY = 'gemini-key-from-env';
+    process.env.TAKT_GOOGLE_API_KEY = 'google-key-from-env';
+    process.env.TAKT_GROQ_API_KEY = 'groq-key-from-env';
+    process.env.TAKT_OPENROUTER_API_KEY = 'openrouter-key-from-env';
 
     const raw: Record<string, unknown> = {};
     applyGlobalConfigEnvOverrides(raw);
 
     expect(raw.cursor_api_key).toBe('cursor-key-from-env');
+    expect(raw.gemini_api_key).toBe('gemini-key-from-env');
+    expect(raw.google_api_key).toBe('google-key-from-env');
+    expect(raw.groq_api_key).toBe('groq-key-from-env');
+    expect(raw.openrouter_api_key).toBe('openrouter-key-from-env');
   });
 });

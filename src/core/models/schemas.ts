@@ -479,7 +479,7 @@ export const PipelineConfigSchema = z.object({
   default_branch_prefix: z.string().optional(),
   commit_message_template: z.string().optional(),
   pr_body_template: z.string().optional(),
-});
+}).strict();
 
 /** Piece category config schema (recursive) */
 export type PieceCategoryConfigNode = {
@@ -498,7 +498,6 @@ export const PieceCategoryConfigSchema = z.record(z.string(), PieceCategoryConfi
 /** Global config schema */
 export const GlobalConfigSchema = z.object({
   language: LanguageSchema.optional().default(DEFAULT_LANGUAGE),
-  log_level: z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
   provider: ProviderReferenceSchema.optional().default('claude'),
   model: z.string().optional(),
   /** Default piece name for new tasks */
@@ -519,6 +518,14 @@ export const GlobalConfigSchema = z.object({
   anthropic_api_key: z.string().optional(),
   /** OpenAI API key for Codex SDK (overridden by TAKT_OPENAI_API_KEY env var) */
   openai_api_key: z.string().optional(),
+  /** Gemini API key (overridden by TAKT_GEMINI_API_KEY env var) */
+  gemini_api_key: z.string().optional(),
+  /** Google API key (overridden by TAKT_GOOGLE_API_KEY env var) */
+  google_api_key: z.string().optional(),
+  /** Groq API key (overridden by TAKT_GROQ_API_KEY env var) */
+  groq_api_key: z.string().optional(),
+  /** OpenRouter API key (overridden by TAKT_OPENROUTER_API_KEY env var) */
+  openrouter_api_key: z.string().optional(),
   /** External Codex CLI path for Codex SDK override (overridden by TAKT_CODEX_CLI_PATH env var) */
   codex_cli_path: z.string().optional(),
   /** External Claude Code CLI path (overridden by TAKT_CLAUDE_CLI_PATH env var) */
@@ -533,24 +540,16 @@ export const GlobalConfigSchema = z.object({
   opencode_api_key: z.string().optional(),
   /** Cursor API key for Cursor Agent CLI/API (overridden by TAKT_CURSOR_API_KEY env var) */
   cursor_api_key: z.string().optional(),
-  /** Pipeline execution settings */
-  pipeline: PipelineConfigSchema.optional(),
-  /** Minimal output mode for CI - suppress AI output to prevent sensitive information leaks */
-  minimal_output: z.boolean().optional().default(false),
   /** Path to bookmarks file (default: ~/.takt/preferences/bookmarks.yaml) */
   bookmarks_file: z.string().optional(),
   /** Path to piece categories file (default: ~/.takt/preferences/piece-categories.yaml) */
   piece_categories_file: z.string().optional(),
-  /** Per-persona provider and model overrides. */
-  persona_providers: z.record(z.string(), PersonaProviderReferenceSchema).optional(),
   /** Global provider-specific options (lowest priority) */
   provider_options: MovementProviderOptionsSchema,
   /** Provider-specific permission profiles */
   provider_profiles: ProviderPermissionProfilesSchema,
   /** Global runtime defaults (piece runtime overrides this) */
   runtime: RuntimeConfigSchema,
-  /** Branch name generation strategy: 'romaji' (fast, default) or 'ai' (slow) */
-  branch_name_strategy: z.enum(['romaji', 'ai']).optional(),
   /** Prevent macOS idle sleep during takt execution using caffeinate (default: false) */
   prevent_sleep: z.boolean().optional(),
   /** Enable notification sounds (default: true when undefined) */
@@ -563,25 +562,18 @@ export const GlobalConfigSchema = z.object({
     run_complete: z.boolean().optional(),
     run_abort: z.boolean().optional(),
   }).optional(),
-  /** Number of movement previews to inject into interactive mode (0 to disable, max 10) */
-  interactive_preview_movements: z.number().int().min(0).max(10).optional().default(3),
-  /** Verbose output mode */
-  verbose: z.boolean().optional().default(false),
-  /** Number of tasks to run concurrently in takt run (default: 1 = sequential, max: 10) */
-  concurrency: z.number().int().min(1).max(10).optional().default(1),
-  /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
-  task_poll_interval_ms: z.number().int().min(100).max(5000).optional().default(500),
   /** Opt-in: fetch remote before cloning to keep clones up-to-date (default: false) */
   auto_fetch: z.boolean().optional().default(false),
   /** Base branch to clone from (default: current branch) */
   base_branch: z.string().optional(),
   /** Piece-level overrides (quality_gates, etc.) */
   piece_overrides: PieceOverridesSchema,
-});
+}).strict();
 
 /** Project config schema */
 export const ProjectConfigSchema = z.object({
   piece: z.string().optional(),
+  log_level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   verbose: z.boolean().optional(),
   provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
@@ -590,10 +582,18 @@ export const ProjectConfigSchema = z.object({
   auto_pr: z.boolean().optional(),
   /** Create PR as draft (project override) */
   draft_pr: z.boolean().optional(),
+  pipeline: PipelineConfigSchema.optional(),
+  persona_providers: z.record(z.string(), PersonaProviderReferenceSchema).optional(),
+  branch_name_strategy: z.enum(['romaji', 'ai']).optional(),
+  minimal_output: z.boolean().optional(),
   provider_options: MovementProviderOptionsSchema,
   provider_profiles: ProviderPermissionProfilesSchema,
   /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
   concurrency: z.number().int().min(1).max(10).optional(),
+  /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
+  task_poll_interval_ms: z.number().int().min(100).max(5000).optional(),
+  /** Number of movement previews to inject into interactive mode (0 to disable, max 10) */
+  interactive_preview_movements: z.number().int().min(0).max(10).optional(),
   /** Base branch to clone from (overrides global base_branch) */
   base_branch: z.string().optional(),
   /** Piece-level overrides (quality_gates, etc.) */
@@ -609,12 +609,4 @@ export const ProjectConfigSchema = z.object({
   ]).optional(),
   /** Compatibility flag for full submodule acquisition when submodules is unset */
   with_submodules: z.boolean().optional(),
-  /** Claude Code CLI path override (project-level) */
-  claude_cli_path: z.string().optional(),
-  /** Codex CLI path override (project-level) */
-  codex_cli_path: z.string().optional(),
-  /** cursor-agent CLI path override (project-level) */
-  cursor_cli_path: z.string().optional(),
-  /** Copilot CLI path override (project-level) */
-  copilot_cli_path: z.string().optional(),
-});
+}).strict();

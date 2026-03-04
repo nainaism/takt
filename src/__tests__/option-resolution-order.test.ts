@@ -6,6 +6,7 @@ const {
   loadAgentPromptMock,
   loadProjectConfigMock,
   loadGlobalConfigMock,
+  resolveConfigValueMock,
   loadTemplateMock,
   providerSetupMock,
   providerCallMock,
@@ -19,6 +20,7 @@ const {
     loadAgentPromptMock: vi.fn(),
     loadProjectConfigMock: vi.fn(),
     loadGlobalConfigMock: vi.fn(),
+    resolveConfigValueMock: vi.fn(),
     loadTemplateMock: vi.fn(),
     providerSetupMock: providerSetup,
     providerCallMock: providerCall,
@@ -32,6 +34,7 @@ vi.mock('../infra/providers/index.js', () => ({
 vi.mock('../infra/config/index.js', () => ({
   loadProjectConfig: loadProjectConfigMock,
   loadGlobalConfig: loadGlobalConfigMock,
+  resolveConfigValue: resolveConfigValueMock,
   loadCustomAgents: loadCustomAgentsMock,
   loadAgentPrompt: loadAgentPromptMock,
 }));
@@ -52,6 +55,12 @@ describe('option resolution order', () => {
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
+    });
+    resolveConfigValueMock.mockImplementation((_cwd: string, key: string) => {
+      if (key === 'personaProviders') {
+        return loadProjectConfigMock.mock.results.at(-1)?.value?.personaProviders;
+      }
+      return undefined;
     });
     loadCustomAgentsMock.mockReturnValue(new Map());
     loadAgentPromptMock.mockReturnValue('prompt');
@@ -98,12 +107,14 @@ describe('option resolution order', () => {
   });
 
   it('should apply persona provider override before local/global config', async () => {
-    loadProjectConfigMock.mockReturnValue({ provider: 'opencode' });
-    loadGlobalConfigMock.mockReturnValue({
-      provider: 'mock',
+    loadProjectConfigMock.mockReturnValue({
+      provider: 'opencode',
       personaProviders: {
         coder: { provider: 'claude' },
       },
+    });
+    loadGlobalConfigMock.mockReturnValue({
+      provider: 'mock',
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
@@ -117,16 +128,16 @@ describe('option resolution order', () => {
   });
 
   it('should resolve model in order: CLI > persona > step > local > global', async () => {
-    loadProjectConfigMock.mockReturnValue({
-      provider: 'claude',
-      model: 'local-model',
-    });
     loadGlobalConfigMock.mockReturnValue({
       provider: 'claude',
       model: 'global-model',
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
+    });
+    loadProjectConfigMock.mockReturnValue({
+      provider: 'claude',
+      model: 'local-model',
       personaProviders: {
         coder: { model: 'persona-model' },
       },

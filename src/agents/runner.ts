@@ -4,7 +4,13 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import { loadCustomAgents, loadAgentPrompt, loadGlobalConfig, loadProjectConfig } from '../infra/config/index.js';
+import {
+  loadCustomAgents,
+  loadAgentPrompt,
+  loadGlobalConfig,
+  loadProjectConfig,
+  resolveConfigValue,
+} from '../infra/config/index.js';
 import { getProvider, type ProviderType, type ProviderCallOptions } from '../infra/providers/index.js';
 import type { AgentResponse, CustomAgentConfig } from '../core/models/index.js';
 import { resolveAgentProviderModel } from '../core/piece/provider-resolution.js';
@@ -36,10 +42,11 @@ export class AgentRunner {
   } {
     const localConfig = loadProjectConfig(cwd);
     const globalConfig = loadGlobalConfig();
+    const personaProviders = resolveConfigValue(cwd, 'personaProviders');
     const resolved = resolveAgentProviderModel({
       cliProvider: options?.provider,
       cliModel: options?.model,
-      personaProviders: globalConfig.personaProviders,
+      personaProviders,
       personaDisplayName,
       stepProvider: options?.stepProvider,
       stepModel: options?.stepModel,

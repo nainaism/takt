@@ -376,6 +376,25 @@ describe('selectPiece', () => {
     expect(configMock.buildCategorizedPieces).toHaveBeenCalled();
   });
 
+  it('should fall back to default current piece when config piece is undefined', async () => {
+    const pieceMap = createPieceMap([{ name: 'default', source: 'builtin' }]);
+    const categorized: CategorizedPieces = {
+      categories: [{ name: 'Quick Start', pieces: ['default'], children: [] }],
+      allPieces: pieceMap,
+      missingPieces: [],
+    };
+
+    configMock.getPieceCategories.mockReturnValue({ categories: ['Quick Start'] });
+    configMock.loadAllPiecesWithSources.mockReturnValue(pieceMap);
+    configMock.buildCategorizedPieces.mockReturnValue(categorized);
+    configMock.resolveConfigValue.mockReturnValue(undefined);
+    selectOptionMock.mockResolvedValueOnce('__current__');
+
+    const result = await selectPiece('/cwd');
+
+    expect(result).toBe('default');
+  });
+
   it('should use directory-based selection when no category config', async () => {
     configMock.getPieceCategories.mockReturnValue(null);
     configMock.listPieces.mockReturnValue(['piece-a', 'piece-b']);

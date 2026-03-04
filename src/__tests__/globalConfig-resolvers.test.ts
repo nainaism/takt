@@ -54,6 +54,8 @@ const {
   resolveCodexCliPath,
   resolveClaudeCliPath,
   resolveCursorCliPath,
+  resolveCopilotCliPath,
+  resolveCopilotGithubToken,
   resolveOpencodeApiKey,
   resolveCursorApiKey,
   validateCliPath,
@@ -67,6 +69,10 @@ describe('GlobalConfigSchema API key fields', () => {
     });
     expect(result.anthropic_api_key).toBeUndefined();
     expect(result.openai_api_key).toBeUndefined();
+    expect(result.gemini_api_key).toBeUndefined();
+    expect(result.google_api_key).toBeUndefined();
+    expect(result.groq_api_key).toBeUndefined();
+    expect(result.openrouter_api_key).toBeUndefined();
   });
 
   it('should accept config with anthropic_api_key', () => {
@@ -95,6 +101,20 @@ describe('GlobalConfigSchema API key fields', () => {
     expect(result.openai_api_key).toBe('sk-openai-key');
   });
 
+  it('should accept config with global API key fields', () => {
+    const result = GlobalConfigSchema.parse({
+      language: 'en',
+      gemini_api_key: 'gemini-test-key',
+      google_api_key: 'google-test-key',
+      groq_api_key: 'groq-test-key',
+      openrouter_api_key: 'openrouter-test-key',
+    });
+    expect(result.gemini_api_key).toBe('gemini-test-key');
+    expect(result.google_api_key).toBe('google-test-key');
+    expect(result.groq_api_key).toBe('groq-test-key');
+    expect(result.openrouter_api_key).toBe('openrouter-test-key');
+  });
+
   it('should accept config with cursor_api_key', () => {
     const result = GlobalConfigSchema.parse({
       language: 'en',
@@ -117,10 +137,13 @@ describe('GlobalConfig load/save with API keys', () => {
   it('should load config with API keys from YAML', () => {
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'anthropic_api_key: sk-ant-from-yaml',
       'openai_api_key: sk-openai-from-yaml',
+      'gemini_api_key: gemini-from-yaml',
+      'google_api_key: google-from-yaml',
+      'groq_api_key: groq-from-yaml',
+      'openrouter_api_key: openrouter-from-yaml',
       'cursor_api_key: cursor-from-yaml',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -128,13 +151,16 @@ describe('GlobalConfig load/save with API keys', () => {
     const config = loadGlobalConfig();
     expect(config.anthropicApiKey).toBe('sk-ant-from-yaml');
     expect(config.openaiApiKey).toBe('sk-openai-from-yaml');
+    expect(config.geminiApiKey).toBe('gemini-from-yaml');
+    expect(config.googleApiKey).toBe('google-from-yaml');
+    expect(config.groqApiKey).toBe('groq-from-yaml');
+    expect(config.openrouterApiKey).toBe('openrouter-from-yaml');
     expect(config.cursorApiKey).toBe('cursor-from-yaml');
   });
 
   it('should load config without API keys', () => {
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -142,13 +168,16 @@ describe('GlobalConfig load/save with API keys', () => {
     const config = loadGlobalConfig();
     expect(config.anthropicApiKey).toBeUndefined();
     expect(config.openaiApiKey).toBeUndefined();
+    expect(config.geminiApiKey).toBeUndefined();
+    expect(config.googleApiKey).toBeUndefined();
+    expect(config.groqApiKey).toBeUndefined();
+    expect(config.openrouterApiKey).toBeUndefined();
   });
 
   it('should save and reload config with API keys', () => {
     // Write initial config
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -156,19 +185,26 @@ describe('GlobalConfig load/save with API keys', () => {
     const config = loadGlobalConfig();
     config.anthropicApiKey = 'sk-ant-saved';
     config.openaiApiKey = 'sk-openai-saved';
+    config.geminiApiKey = 'gemini-saved';
+    config.googleApiKey = 'google-saved';
+    config.groqApiKey = 'groq-saved';
+    config.openrouterApiKey = 'openrouter-saved';
     config.cursorApiKey = 'cursor-saved';
     saveGlobalConfig(config);
 
     const reloaded = loadGlobalConfig();
     expect(reloaded.anthropicApiKey).toBe('sk-ant-saved');
     expect(reloaded.openaiApiKey).toBe('sk-openai-saved');
+    expect(reloaded.geminiApiKey).toBe('gemini-saved');
+    expect(reloaded.googleApiKey).toBe('google-saved');
+    expect(reloaded.groqApiKey).toBe('groq-saved');
+    expect(reloaded.openrouterApiKey).toBe('openrouter-saved');
     expect(reloaded.cursorApiKey).toBe('cursor-saved');
   });
 
   it('should not persist API keys when not set', () => {
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -179,6 +215,10 @@ describe('GlobalConfig load/save with API keys', () => {
     const content = readFileSync(configPath, 'utf-8');
     expect(content).not.toContain('anthropic_api_key');
     expect(content).not.toContain('openai_api_key');
+    expect(content).not.toContain('gemini_api_key');
+    expect(content).not.toContain('google_api_key');
+    expect(content).not.toContain('groq_api_key');
+    expect(content).not.toContain('openrouter_api_key');
     expect(content).not.toContain('cursor_api_key');
   });
 });
@@ -204,7 +244,6 @@ describe('resolveAnthropicApiKey', () => {
     process.env['TAKT_ANTHROPIC_API_KEY'] = 'sk-ant-from-env';
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'anthropic_api_key: sk-ant-from-yaml',
     ].join('\n');
@@ -218,7 +257,6 @@ describe('resolveAnthropicApiKey', () => {
     delete process.env['TAKT_ANTHROPIC_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'anthropic_api_key: sk-ant-from-yaml',
     ].join('\n');
@@ -232,7 +270,6 @@ describe('resolveAnthropicApiKey', () => {
     delete process.env['TAKT_ANTHROPIC_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -248,6 +285,13 @@ describe('resolveAnthropicApiKey', () => {
 
     const key = resolveAnthropicApiKey();
     expect(key).toBeUndefined();
+  });
+
+  it('should throw when config yaml is invalid', () => {
+    delete process.env['TAKT_ANTHROPIC_API_KEY'];
+    writeFileSync(configPath, 'language: [\n', 'utf-8');
+
+    expect(() => resolveAnthropicApiKey()).toThrow();
   });
 });
 
@@ -272,7 +316,6 @@ describe('resolveOpenaiApiKey', () => {
     process.env['TAKT_OPENAI_API_KEY'] = 'sk-openai-from-env';
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'openai_api_key: sk-openai-from-yaml',
     ].join('\n');
@@ -286,7 +329,6 @@ describe('resolveOpenaiApiKey', () => {
     delete process.env['TAKT_OPENAI_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'openai_api_key: sk-openai-from-yaml',
     ].join('\n');
@@ -300,13 +342,19 @@ describe('resolveOpenaiApiKey', () => {
     delete process.env['TAKT_OPENAI_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
 
     const key = resolveOpenaiApiKey();
     expect(key).toBeUndefined();
+  });
+
+  it('should throw when config yaml is invalid', () => {
+    delete process.env['TAKT_OPENAI_API_KEY'];
+    writeFileSync(configPath, 'language: [\n', 'utf-8');
+
+    expect(() => resolveOpenaiApiKey()).toThrow();
   });
 });
 
@@ -333,7 +381,6 @@ describe('resolveCodexCliPath', () => {
     process.env['TAKT_CODEX_CLI_PATH'] = envCodexPath;
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: codex',
       `codex_cli_path: ${configCodexPath}`,
     ].join('\n');
@@ -348,7 +395,6 @@ describe('resolveCodexCliPath', () => {
     const configCodexPath = createExecutableFile('config-codex');
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: codex',
       `codex_cli_path: ${configCodexPath}`,
     ].join('\n');
@@ -362,7 +408,6 @@ describe('resolveCodexCliPath', () => {
     delete process.env['TAKT_CODEX_CLI_PATH'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: codex',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -407,7 +452,6 @@ describe('resolveCodexCliPath', () => {
     delete process.env['TAKT_CODEX_CLI_PATH'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: codex',
       `codex_cli_path: ${join(testDir, 'missing-codex-from-config')}`,
     ].join('\n');
@@ -438,7 +482,6 @@ describe('resolveOpencodeApiKey', () => {
     process.env['TAKT_OPENCODE_API_KEY'] = 'sk-opencode-from-env';
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'opencode_api_key: sk-opencode-from-yaml',
     ].join('\n');
@@ -452,7 +495,6 @@ describe('resolveOpencodeApiKey', () => {
     delete process.env['TAKT_OPENCODE_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       'opencode_api_key: sk-opencode-from-yaml',
     ].join('\n');
@@ -466,13 +508,19 @@ describe('resolveOpencodeApiKey', () => {
     delete process.env['TAKT_OPENCODE_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
 
     const key = resolveOpencodeApiKey();
     expect(key).toBeUndefined();
+  });
+
+  it('should throw when config yaml is invalid', () => {
+    delete process.env['TAKT_OPENCODE_API_KEY'];
+    writeFileSync(configPath, 'language: [\n', 'utf-8');
+
+    expect(() => resolveOpencodeApiKey()).toThrow();
   });
 });
 
@@ -497,7 +545,6 @@ describe('resolveCursorApiKey', () => {
     process.env['TAKT_CURSOR_API_KEY'] = 'cursor-from-env';
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
       'cursor_api_key: cursor-from-yaml',
     ].join('\n');
@@ -511,7 +558,6 @@ describe('resolveCursorApiKey', () => {
     delete process.env['TAKT_CURSOR_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
       'cursor_api_key: cursor-from-yaml',
     ].join('\n');
@@ -525,13 +571,19 @@ describe('resolveCursorApiKey', () => {
     delete process.env['TAKT_CURSOR_API_KEY'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
 
     const key = resolveCursorApiKey();
     expect(key).toBeUndefined();
+  });
+
+  it('should throw when config yaml is invalid', () => {
+    delete process.env['TAKT_CURSOR_API_KEY'];
+    writeFileSync(configPath, 'language: [\n', 'utf-8');
+
+    expect(() => resolveCursorApiKey()).toThrow();
   });
 });
 
@@ -623,7 +675,6 @@ describe('resolveClaudeCliPath', () => {
     process.env['TAKT_CLAUDE_CLI_PATH'] = envPath;
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       `claude_cli_path: ${configPath2}`,
     ].join('\n');
@@ -633,36 +684,11 @@ describe('resolveClaudeCliPath', () => {
     expect(path).toBe(envPath);
   });
 
-  it('should use project config when env var is not set', () => {
-    delete process.env['TAKT_CLAUDE_CLI_PATH'];
-    const projPath = createExecutableFile('project-claude');
-
-    const path = resolveClaudeCliPath({ claudeCliPath: projPath });
-    expect(path).toBe(projPath);
-  });
-
-  it('should prefer project config over global config', () => {
-    delete process.env['TAKT_CLAUDE_CLI_PATH'];
-    const projPath = createExecutableFile('project-claude');
-    const globalPath = createExecutableFile('global-claude');
-    const yaml = [
-      'language: en',
-      'log_level: info',
-      'provider: claude',
-      `claude_cli_path: ${globalPath}`,
-    ].join('\n');
-    writeFileSync(configPath, yaml, 'utf-8');
-
-    const path = resolveClaudeCliPath({ claudeCliPath: projPath });
-    expect(path).toBe(projPath);
-  });
-
-  it('should fall back to global config when neither env nor project is set', () => {
+  it('should use global config when env var is not set', () => {
     delete process.env['TAKT_CLAUDE_CLI_PATH'];
     const globalPath = createExecutableFile('global-claude');
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
       `claude_cli_path: ${globalPath}`,
     ].join('\n');
@@ -676,7 +702,6 @@ describe('resolveClaudeCliPath', () => {
     delete process.env['TAKT_CLAUDE_CLI_PATH'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: claude',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -714,7 +739,6 @@ describe('resolveCursorCliPath', () => {
     process.env['TAKT_CURSOR_CLI_PATH'] = envPath;
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
       `cursor_cli_path: ${configPath2}`,
     ].join('\n');
@@ -724,36 +748,11 @@ describe('resolveCursorCliPath', () => {
     expect(path).toBe(envPath);
   });
 
-  it('should use project config when env var is not set', () => {
-    delete process.env['TAKT_CURSOR_CLI_PATH'];
-    const projPath = createExecutableFile('project-cursor');
-
-    const path = resolveCursorCliPath({ cursorCliPath: projPath });
-    expect(path).toBe(projPath);
-  });
-
-  it('should prefer project config over global config', () => {
-    delete process.env['TAKT_CURSOR_CLI_PATH'];
-    const projPath = createExecutableFile('project-cursor');
-    const globalPath = createExecutableFile('global-cursor');
-    const yaml = [
-      'language: en',
-      'log_level: info',
-      'provider: cursor',
-      `cursor_cli_path: ${globalPath}`,
-    ].join('\n');
-    writeFileSync(configPath, yaml, 'utf-8');
-
-    const path = resolveCursorCliPath({ cursorCliPath: projPath });
-    expect(path).toBe(projPath);
-  });
-
-  it('should fall back to global config when neither env nor project is set', () => {
+  it('should use global config when env var is not set', () => {
     delete process.env['TAKT_CURSOR_CLI_PATH'];
     const globalPath = createExecutableFile('global-cursor');
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
       `cursor_cli_path: ${globalPath}`,
     ].join('\n');
@@ -767,7 +766,6 @@ describe('resolveCursorCliPath', () => {
     delete process.env['TAKT_CURSOR_CLI_PATH'];
     const yaml = [
       'language: en',
-      'log_level: info',
       'provider: cursor',
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
@@ -782,12 +780,8 @@ describe('resolveCursorCliPath', () => {
   });
 });
 
-// ============================================================
-// Task 6.3 — resolveCodexCliPath project config layer tests
-// ============================================================
-
-describe('resolveCodexCliPath — project config layer', () => {
-  const originalEnv = process.env['TAKT_CODEX_CLI_PATH'];
+describe('resolveCopilotCliPath', () => {
+  const originalEnv = process.env['TAKT_COPILOT_CLI_PATH'];
 
   beforeEach(() => {
     invalidateGlobalConfigCache();
@@ -796,49 +790,119 @@ describe('resolveCodexCliPath — project config layer', () => {
 
   afterEach(() => {
     if (originalEnv !== undefined) {
-      process.env['TAKT_CODEX_CLI_PATH'] = originalEnv;
+      process.env['TAKT_COPILOT_CLI_PATH'] = originalEnv;
     } else {
-      delete process.env['TAKT_CODEX_CLI_PATH'];
+      delete process.env['TAKT_COPILOT_CLI_PATH'];
     }
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('should use project config when env var is not set', () => {
-    delete process.env['TAKT_CODEX_CLI_PATH'];
-    const projPath = createExecutableFile('project-codex');
-
-    const path = resolveCodexCliPath({ codexCliPath: projPath });
-    expect(path).toBe(projPath);
-  });
-
-  it('should prefer env var over project config', () => {
-    const envPath = createExecutableFile('env-codex');
-    const projPath = createExecutableFile('project-codex');
-    process.env['TAKT_CODEX_CLI_PATH'] = envPath;
-
-    const path = resolveCodexCliPath({ codexCliPath: projPath });
-    expect(path).toBe(envPath);
-  });
-
-  it('should prefer project config over global config', () => {
-    delete process.env['TAKT_CODEX_CLI_PATH'];
-    const projPath = createExecutableFile('project-codex');
-    const globalPath = createExecutableFile('global-codex');
+  it('should return env var path when set (highest priority)', () => {
+    const envPath = createExecutableFile('env-copilot');
+    const configPath2 = createExecutableFile('config-copilot');
+    process.env['TAKT_COPILOT_CLI_PATH'] = envPath;
     const yaml = [
       'language: en',
-      'log_level: info',
-      'provider: codex',
-      `codex_cli_path: ${globalPath}`,
+      'provider: copilot',
+      `copilot_cli_path: ${configPath2}`,
     ].join('\n');
     writeFileSync(configPath, yaml, 'utf-8');
 
-    const path = resolveCodexCliPath({ codexCliPath: projPath });
-    expect(path).toBe(projPath);
+    const path = resolveCopilotCliPath();
+    expect(path).toBe(envPath);
   });
 
-  it('should throw when project config path is invalid', () => {
-    delete process.env['TAKT_CODEX_CLI_PATH'];
-    expect(() => resolveCodexCliPath({ codexCliPath: join(testDir, 'missing-codex') }))
-      .toThrow(/does not exist/i);
+  it('should use global config when env var is not set', () => {
+    delete process.env['TAKT_COPILOT_CLI_PATH'];
+    const globalPath = createExecutableFile('global-copilot');
+    const yaml = [
+      'language: en',
+      'provider: copilot',
+      `copilot_cli_path: ${globalPath}`,
+    ].join('\n');
+    writeFileSync(configPath, yaml, 'utf-8');
+
+    const path = resolveCopilotCliPath();
+    expect(path).toBe(globalPath);
+  });
+
+  it('should return undefined when nothing is set', () => {
+    delete process.env['TAKT_COPILOT_CLI_PATH'];
+    const yaml = [
+      'language: en',
+      'provider: copilot',
+    ].join('\n');
+    writeFileSync(configPath, yaml, 'utf-8');
+
+    const path = resolveCopilotCliPath();
+    expect(path).toBeUndefined();
+  });
+
+  it('should throw when env path is invalid', () => {
+    process.env['TAKT_COPILOT_CLI_PATH'] = join(testDir, 'missing-copilot');
+    expect(() => resolveCopilotCliPath()).toThrow(/does not exist/i);
+  });
+});
+
+describe('resolveCopilotGithubToken', () => {
+  const originalEnv = process.env['TAKT_COPILOT_GITHUB_TOKEN'];
+
+  beforeEach(() => {
+    invalidateGlobalConfigCache();
+    mkdirSync(taktDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env['TAKT_COPILOT_GITHUB_TOKEN'] = originalEnv;
+    } else {
+      delete process.env['TAKT_COPILOT_GITHUB_TOKEN'];
+    }
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('should return env var when set', () => {
+    process.env['TAKT_COPILOT_GITHUB_TOKEN'] = 'ghu-from-env';
+    const yaml = [
+      'language: en',
+      'provider: copilot',
+      'copilot_github_token: ghu-from-yaml',
+    ].join('\n');
+    writeFileSync(configPath, yaml, 'utf-8');
+
+    const token = resolveCopilotGithubToken();
+    expect(token).toBe('ghu-from-env');
+  });
+
+  it('should fall back to config when env var is not set', () => {
+    delete process.env['TAKT_COPILOT_GITHUB_TOKEN'];
+    const yaml = [
+      'language: en',
+      'provider: copilot',
+      'copilot_github_token: ghu-from-yaml',
+    ].join('\n');
+    writeFileSync(configPath, yaml, 'utf-8');
+
+    const token = resolveCopilotGithubToken();
+    expect(token).toBe('ghu-from-yaml');
+  });
+
+  it('should return undefined when neither env var nor config is set', () => {
+    delete process.env['TAKT_COPILOT_GITHUB_TOKEN'];
+    const yaml = [
+      'language: en',
+      'provider: copilot',
+    ].join('\n');
+    writeFileSync(configPath, yaml, 'utf-8');
+
+    const token = resolveCopilotGithubToken();
+    expect(token).toBeUndefined();
+  });
+
+  it('should throw when config yaml is invalid', () => {
+    delete process.env['TAKT_COPILOT_GITHUB_TOKEN'];
+    writeFileSync(configPath, 'language: [\n', 'utf-8');
+
+    expect(() => resolveCopilotGithubToken()).toThrow();
   });
 });

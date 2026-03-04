@@ -40,6 +40,30 @@ import {
   invalidateGlobalConfigCache,
 } from '../infra/config/index.js';
 
+let isolatedGlobalConfigDir: string;
+let originalTaktConfigDirForFile: string | undefined;
+
+beforeEach(() => {
+  originalTaktConfigDirForFile = process.env.TAKT_CONFIG_DIR;
+  isolatedGlobalConfigDir = join(tmpdir(), `takt-config-test-global-${randomUUID()}`);
+  mkdirSync(isolatedGlobalConfigDir, { recursive: true });
+  process.env.TAKT_CONFIG_DIR = isolatedGlobalConfigDir;
+  writeFileSync(join(isolatedGlobalConfigDir, 'config.yaml'), 'language: en\n', 'utf-8');
+  invalidateGlobalConfigCache();
+});
+
+afterEach(() => {
+  if (originalTaktConfigDirForFile === undefined) {
+    delete process.env.TAKT_CONFIG_DIR;
+  } else {
+    process.env.TAKT_CONFIG_DIR = originalTaktConfigDirForFile;
+  }
+  invalidateGlobalConfigCache();
+  if (existsSync(isolatedGlobalConfigDir)) {
+    rmSync(isolatedGlobalConfigDir, { recursive: true, force: true });
+  }
+});
+
 describe('getBuiltinPiece', () => {
   it('should return builtin piece when it exists in resources', () => {
     const piece = getBuiltinPiece('default', process.cwd());
@@ -347,6 +371,28 @@ describe('setCurrentPiece', () => {
 
     expect(piece).toBe('second');
   });
+
+  it('should preserve provider_options when updating piece', () => {
+    const configDir = getProjectConfigDir(testDir);
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'config.yaml'),
+      [
+        'piece: first',
+        'provider_options:',
+        '  codex:',
+        '    network_access: true',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    setCurrentPiece(testDir, 'updated');
+
+    const saved = readFileSync(join(configDir, 'config.yaml'), 'utf-8');
+    expect(saved).toContain('piece: updated');
+    expect(saved).toContain('provider_options:');
+    expect(saved).toContain('network_access: true');
+  });
 });
 
 describe('loadProjectConfig provider_options', () => {
@@ -457,7 +503,7 @@ describe('loadProjectConfig provider_options', () => {
       '  unknown_option: true',
     ].join('\n'));
 
-    expect(() => loadProjectConfig(testDir)).toThrow(/unknown fields|unrecognized key/i);
+    expect(() => loadProjectConfig(testDir)).toThrow(/Configuration error: invalid provider/);
   });
 
   it('should throw when project provider has unsupported type', () => {
@@ -622,7 +668,7 @@ describe('isVerboseMode', () => {
 
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: false\n');
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'language: en\n');
 
     expect(isVerboseMode(testDir)).toBe(true);
   });
@@ -634,21 +680,21 @@ describe('isVerboseMode', () => {
 
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: true\n');
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'language: en\n');
 
     expect(isVerboseMode(testDir)).toBe(false);
   });
 
-  it('should fallback to global verbose when project verbose is not set', () => {
+  it('should use default verbose=false when project verbose is not set', () => {
     const projectConfigDir = getProjectConfigDir(testDir);
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(projectConfigDir, 'config.yaml'), 'piece: default\n');
 
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: true\n');
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'language: en\n');
 
-    expect(isVerboseMode(testDir)).toBe(true);
+    expect(isVerboseMode(testDir)).toBe(false);
   });
 
   it('should return false when neither project nor global verbose is set', () => {
@@ -662,7 +708,7 @@ describe('isVerboseMode', () => {
 
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: false\n');
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'language: en\n');
 
     process.env.TAKT_VERBOSE = 'true';
     expect(isVerboseMode(testDir)).toBe(true);

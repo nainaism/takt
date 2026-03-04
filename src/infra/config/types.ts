@@ -4,7 +4,13 @@
 
 import type { MovementProviderOptions } from '../../core/models/piece-types.js';
 import type { ProviderPermissionProfiles } from '../../core/models/provider-profiles.js';
-import type { AnalyticsConfig, PieceOverrides, SubmoduleSelection } from '../../core/models/persisted-global-config.js';
+import type {
+  AnalyticsConfig,
+  PersonaProviderEntry,
+  PieceOverrides,
+  PipelineConfig,
+  SubmoduleSelection,
+} from '../../core/models/persisted-global-config.js';
 
 /** Project configuration stored in .takt/config.yaml */
 export interface ProjectLocalConfig {
@@ -26,8 +32,22 @@ export interface ProjectLocalConfig {
   withSubmodules?: boolean;
   /** Verbose output mode */
   verbose?: boolean;
+  /** Project log level */
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  /** Pipeline execution settings */
+  pipeline?: PipelineConfig;
+  /** Per-persona provider/model overrides */
+  personaProviders?: Record<string, PersonaProviderEntry>;
+  /** Branch name generation strategy */
+  branchNameStrategy?: 'romaji' | 'ai';
+  /** Minimal output mode */
+  minimalOutput?: boolean;
   /** Number of tasks to run concurrently in takt run (1-10) */
   concurrency?: number;
+  /** Polling interval in ms for task pickup */
+  taskPollIntervalMs?: number;
+  /** Number of movement previews in interactive mode */
+  interactivePreviewMovements?: number;
   /** Project-level analytics overrides */
   analytics?: AnalyticsConfig;
   /** Provider-specific options (overrides global, overridden by piece/movement) */
@@ -36,14 +56,6 @@ export interface ProjectLocalConfig {
   providerProfiles?: ProviderPermissionProfiles;
   /** Piece-level overrides (quality_gates, etc.) */
   pieceOverrides?: PieceOverrides;
-  /** Claude Code CLI path override (project-level) */
-  claudeCliPath?: string;
-  /** Codex CLI path override (project-level) */
-  codexCliPath?: string;
-  /** cursor-agent CLI path override (project-level) */
-  cursorCliPath?: string;
-  /** Copilot CLI path override (project-level) */
-  copilotCliPath?: string;
 }
 
 /** Persona session data for persistence */

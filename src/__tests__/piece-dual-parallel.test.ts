@@ -10,7 +10,20 @@
  * - Sub-movement rules use simple approved/needs_fix conditions
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../infra/config/global/globalConfig.js', async (importOriginal) => {
+  const original = await importOriginal() as Record<string, unknown>;
+  return {
+    ...original,
+    loadGlobalConfig: () => ({
+      language: 'en',
+      provider: 'claude',
+      autoFetch: false,
+    }),
+  };
+});
+
 import { loadPiece } from '../infra/config/index.js';
 
 describe('dual piece parallel structure', () => {

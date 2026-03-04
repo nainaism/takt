@@ -3,7 +3,6 @@
  */
 
 export {
-  GlobalConfigManager,
   invalidateGlobalConfigCache,
   loadGlobalConfig,
   saveGlobalConfig,

@@ -1,140 +1,84 @@
-/**
- * Project-level configuration management
- *
- * Manages .takt/config.yaml for project-specific settings.
- */
-
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { ProjectConfigSchema } from '../../../core/models/index.js';
 import { copyProjectResourcesToDir } from '../../resources/index.js';
 import type { ProjectLocalConfig } from '../types.js';
-import type { AnalyticsConfig, SubmoduleSelection } from '../../../core/models/persisted-global-config.js';
 import { applyProjectConfigEnvOverrides } from '../env/config-env-overrides.js';
 import {
   normalizeConfigProviderReference,
   type ConfigProviderReference,
 } from '../providerReference.js';
 import {
+  normalizePipelineConfig,
   normalizeProviderProfiles,
   denormalizeProviderProfiles,
+  denormalizeProviderOptions,
+  normalizePersonaProviders,
   normalizePieceOverrides,
   denormalizePieceOverrides,
 } from '../configNormalizers.js';
 import { invalidateResolvedConfigCache } from '../resolutionCache.js';
+import { MIGRATED_PROJECT_LOCAL_DEFAULTS } from '../migratedProjectLocalDefaults.js';
+import type { MigratedProjectLocalConfigKey } from '../migratedProjectLocalKeys.js';
+import { getProjectConfigDir, getProjectConfigPath } from './projectConfigPaths.js';
+import {
+  normalizeSubmodules,
+  normalizeWithSubmodules,
+  normalizeAnalytics,
+  denormalizeAnalytics,
+  formatIssuePath,
+} from './projectConfigTransforms.js';
 
 export type { ProjectLocalConfig } from '../types.js';
 
-/** Default project configuration */
-const DEFAULT_PROJECT_CONFIG: ProjectLocalConfig = {};
+type Assert<T extends true> = T;
+type IsNever<T> = [T] extends [never] ? true : false;
 
-const SUBMODULES_ALL = 'all';
+/**
+ * Compile-time guard:
+ * migrated fields must be owned by ProjectLocalConfig.
+ */
+const projectLocalConfigMigratedFieldGuard:
+  Assert<IsNever<Exclude<MigratedProjectLocalConfigKey, keyof ProjectLocalConfig>>> = true;
+void projectLocalConfigMigratedFieldGuard;
+
 type ProviderType = NonNullable<ProjectLocalConfig['provider']>;
 type RawProviderReference = ConfigProviderReference<ProviderType>;
-
-function normalizeSubmodules(raw: unknown): SubmoduleSelection | undefined {
-  if (raw === undefined) return undefined;
-
-  if (typeof raw === 'string') {
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === SUBMODULES_ALL) {
-      return SUBMODULES_ALL;
-    }
-    throw new Error('Invalid submodules: string value must be "all"');
-  }
-
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) {
-      throw new Error('Invalid submodules: explicit path list must not be empty');
-    }
-
-    const normalizedPaths = raw.map((entry) => {
-      if (typeof entry !== 'string') {
-        throw new Error('Invalid submodules: path entries must be strings');
-      }
-      const trimmed = entry.trim();
-      if (trimmed.length === 0) {
-        throw new Error('Invalid submodules: path entries must not be empty');
-      }
-      if (trimmed.includes('*')) {
-        throw new Error(`Invalid submodules: wildcard is not supported (${trimmed})`);
-      }
-      return trimmed;
-    });
-
-    return normalizedPaths;
-  }
-
-  throw new Error('Invalid submodules: must be "all" or an explicit path list');
-}
-
-function normalizeWithSubmodules(raw: unknown): boolean | undefined {
-  if (raw === undefined) return undefined;
-  if (typeof raw === 'boolean') return raw;
-  throw new Error('Invalid with_submodules: value must be boolean');
-}
-
-/**
- * Get project takt config directory (.takt in project)
- * Note: Defined locally to avoid circular dependency with paths.ts
- */
-function getConfigDir(projectDir: string): string {
-  return join(resolve(projectDir), '.takt');
-}
-
-/**
- * Get project config file path
- * Note: Defined locally to avoid circular dependency with paths.ts
- */
-function getConfigPath(projectDir: string): string {
-  return join(getConfigDir(projectDir), 'config.yaml');
-}
-
-function normalizeAnalytics(raw: Record<string, unknown> | undefined): AnalyticsConfig | undefined {
-  if (!raw) return undefined;
-  const enabled = typeof raw.enabled === 'boolean' ? raw.enabled : undefined;
-  const eventsPath = typeof raw.events_path === 'string'
-    ? raw.events_path
-    : (typeof raw.eventsPath === 'string' ? raw.eventsPath : undefined);
-  const retentionDays = typeof raw.retention_days === 'number'
-    ? raw.retention_days
-    : (typeof raw.retentionDays === 'number' ? raw.retentionDays : undefined);
-
-  if (enabled === undefined && eventsPath === undefined && retentionDays === undefined) {
-    return undefined;
-  }
-  return { enabled, eventsPath, retentionDays };
-}
-
-function denormalizeAnalytics(config: AnalyticsConfig | undefined): Record<string, unknown> | undefined {
-  if (!config) return undefined;
-  const raw: Record<string, unknown> = {};
-  if (config.enabled !== undefined) raw.enabled = config.enabled;
-  if (config.eventsPath) raw.events_path = config.eventsPath;
-  if (config.retentionDays !== undefined) raw.retention_days = config.retentionDays;
-  return Object.keys(raw).length > 0 ? raw : undefined;
-}
 
 /**
  * Load project configuration from .takt/config.yaml
  */
 export function loadProjectConfig(projectDir: string): ProjectLocalConfig {
-  const configPath = getConfigPath(projectDir);
+  const configPath = getProjectConfigPath(projectDir);
 
   const rawConfig: Record<string, unknown> = {};
   if (existsSync(configPath)) {
+    const content = readFileSync(configPath, 'utf-8');
+    let parsed: unknown;
     try {
-      const content = readFileSync(configPath, 'utf-8');
-      const parsed = (parse(content) as Record<string, unknown> | null) ?? {};
-      Object.assign(rawConfig, parsed);
-    } catch {
-      return { ...DEFAULT_PROJECT_CONFIG };
+      parsed = parse(content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Configuration error: failed to parse ${configPath}: ${message}`);
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      Object.assign(rawConfig, parsed as Record<string, unknown>);
+    } else if (parsed != null) {
+      throw new Error(`Configuration error: ${configPath} must be a YAML object.`);
     }
   }
 
   applyProjectConfigEnvOverrides(rawConfig);
-  const parsedConfig = ProjectConfigSchema.parse(rawConfig);
+  const parsedResult = ProjectConfigSchema.safeParse(rawConfig);
+  if (!parsedResult.success) {
+    const firstIssue = parsedResult.error.issues[0];
+    const issuePath = firstIssue ? formatIssuePath(firstIssue.path) : '(root)';
+    const issueMessage = firstIssue?.message ?? 'Invalid configuration value';
+    throw new Error(
+      `Configuration error: invalid ${issuePath} in ${configPath}: ${issueMessage}`,
+    );
+  }
+  const parsedConfig = parsedResult.data;
 
   const {
     provider,
@@ -147,11 +91,16 @@ export function loadProjectConfig(projectDir: string): ProjectLocalConfig {
     provider_options,
     provider_profiles,
     analytics,
+    log_level,
+    pipeline,
+    persona_providers,
+    verbose,
+    branch_name_strategy,
+    minimal_output,
+    concurrency,
+    task_poll_interval_ms,
+    interactive_preview_movements,
     piece_overrides,
-    claude_cli_path,
-    codex_cli_path,
-    cursor_cli_path,
-    copilot_cli_path,
     ...rest
   } = parsedConfig;
   const normalizedProvider = normalizeConfigProviderReference(
@@ -163,10 +112,24 @@ export function loadProjectConfig(projectDir: string): ProjectLocalConfig {
   const normalizedSubmodules = normalizeSubmodules(submodules);
   const normalizedWithSubmodules = normalizeWithSubmodules(with_submodules);
   const effectiveWithSubmodules = normalizedSubmodules === undefined ? normalizedWithSubmodules : undefined;
+  const normalizedPipeline = normalizePipelineConfig(
+    pipeline as { default_branch_prefix?: string; commit_message_template?: string; pr_body_template?: string } | undefined,
+  );
+  const personaProviders = normalizePersonaProviders(
+    persona_providers as Record<string, string | { type?: string; provider?: string; model?: string }> | undefined,
+  );
 
   return {
-    ...DEFAULT_PROJECT_CONFIG,
     ...(rest as ProjectLocalConfig),
+    logLevel: log_level as ProjectLocalConfig['logLevel'],
+    pipeline: normalizedPipeline,
+    personaProviders,
+    branchNameStrategy: branch_name_strategy as ProjectLocalConfig['branchNameStrategy'],
+    minimalOutput: minimal_output as boolean | undefined,
+    concurrency: concurrency as number | undefined,
+    taskPollIntervalMs: task_poll_interval_ms as number | undefined,
+    interactivePreviewMovements: interactive_preview_movements as number | undefined,
+    verbose: verbose as boolean | undefined,
     autoPr: auto_pr as boolean | undefined,
     draftPr: draft_pr as boolean | undefined,
     baseBranch: base_branch as string | undefined,
@@ -178,10 +141,6 @@ export function loadProjectConfig(projectDir: string): ProjectLocalConfig {
     providerOptions: normalizedProvider.providerOptions,
     providerProfiles: normalizeProviderProfiles(provider_profiles as Record<string, { default_permission_mode: unknown; movement_permission_overrides?: Record<string, unknown> }> | undefined),
     pieceOverrides: normalizePieceOverrides(piece_overrides as { quality_gates?: string[]; quality_gates_edit_only?: boolean; movements?: Record<string, { quality_gates?: string[] }> } | undefined),
-    claudeCliPath: claude_cli_path as string | undefined,
-    codexCliPath: codex_cli_path as string | undefined,
-    cursorCliPath: cursor_cli_path as string | undefined,
-    copilotCliPath: copilot_cli_path as string | undefined,
   };
 }
 
@@ -189,8 +148,8 @@ export function loadProjectConfig(projectDir: string): ProjectLocalConfig {
  * Save project configuration to .takt/config.yaml
  */
 export function saveProjectConfig(projectDir: string, config: ProjectLocalConfig): void {
-  const configDir = getConfigDir(projectDir);
-  const configPath = getConfigPath(projectDir);
+  const configDir = getProjectConfigDir(projectDir);
+  const configPath = getProjectConfigPath(projectDir);
 
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true });
@@ -214,12 +173,74 @@ export function saveProjectConfig(projectDir: string, config: ProjectLocalConfig
   } else {
     delete savePayload.provider_profiles;
   }
+  const rawProviderOptions = denormalizeProviderOptions(config.providerOptions);
+  if (rawProviderOptions) {
+    savePayload.provider_options = rawProviderOptions;
+  } else {
+    delete savePayload.provider_options;
+  }
   delete savePayload.providerProfiles;
   delete savePayload.providerOptions;
+  delete savePayload.concurrency;
+  delete savePayload.verbose;
 
   if (config.autoPr !== undefined) savePayload.auto_pr = config.autoPr;
   if (config.draftPr !== undefined) savePayload.draft_pr = config.draftPr;
   if (config.baseBranch !== undefined) savePayload.base_branch = config.baseBranch;
+  if (
+    config.logLevel !== undefined
+    && config.logLevel !== MIGRATED_PROJECT_LOCAL_DEFAULTS.logLevel
+  ) {
+    savePayload.log_level = config.logLevel;
+  }
+  if (config.branchNameStrategy !== undefined) savePayload.branch_name_strategy = config.branchNameStrategy;
+  if (
+    config.minimalOutput !== undefined
+    && config.minimalOutput !== MIGRATED_PROJECT_LOCAL_DEFAULTS.minimalOutput
+  ) {
+    savePayload.minimal_output = config.minimalOutput;
+  }
+  if (
+    config.taskPollIntervalMs !== undefined
+    && config.taskPollIntervalMs !== MIGRATED_PROJECT_LOCAL_DEFAULTS.taskPollIntervalMs
+  ) {
+    savePayload.task_poll_interval_ms = config.taskPollIntervalMs;
+  }
+  if (
+    config.interactivePreviewMovements !== undefined
+    && config.interactivePreviewMovements !== MIGRATED_PROJECT_LOCAL_DEFAULTS.interactivePreviewMovements
+  ) {
+    savePayload.interactive_preview_movements = config.interactivePreviewMovements;
+  }
+  if (
+    config.concurrency !== undefined
+    && config.concurrency !== MIGRATED_PROJECT_LOCAL_DEFAULTS.concurrency
+  ) {
+    savePayload.concurrency = config.concurrency;
+  }
+  if (
+    config.verbose !== undefined
+    && config.verbose !== MIGRATED_PROJECT_LOCAL_DEFAULTS.verbose
+  ) {
+    savePayload.verbose = config.verbose;
+  }
+  delete savePayload.pipeline;
+  if (config.pipeline) {
+    const pipelineRaw: Record<string, unknown> = {};
+    if (config.pipeline.defaultBranchPrefix !== undefined) {
+      pipelineRaw.default_branch_prefix = config.pipeline.defaultBranchPrefix;
+    }
+    if (config.pipeline.commitMessageTemplate !== undefined) {
+      pipelineRaw.commit_message_template = config.pipeline.commitMessageTemplate;
+    }
+    if (config.pipeline.prBodyTemplate !== undefined) {
+      pipelineRaw.pr_body_template = config.pipeline.prBodyTemplate;
+    }
+    if (Object.keys(pipelineRaw).length > 0) savePayload.pipeline = pipelineRaw;
+  }
+  if (config.personaProviders && Object.keys(config.personaProviders).length > 0) {
+    savePayload.persona_providers = config.personaProviders;
+  }
   if (normalizedSubmodules !== undefined) {
     savePayload.submodules = normalizedSubmodules;
     delete savePayload.with_submodules;
@@ -235,6 +256,12 @@ export function saveProjectConfig(projectDir: string, config: ProjectLocalConfig
   delete savePayload.draftPr;
   delete savePayload.baseBranch;
   delete savePayload.withSubmodules;
+  delete savePayload.logLevel;
+  delete savePayload.branchNameStrategy;
+  delete savePayload.minimalOutput;
+  delete savePayload.taskPollIntervalMs;
+  delete savePayload.interactivePreviewMovements;
+  delete savePayload.personaProviders;
 
   const rawPieceOverrides = denormalizePieceOverrides(config.pieceOverrides);
   if (rawPieceOverrides) {
@@ -247,9 +274,6 @@ export function saveProjectConfig(projectDir: string, config: ProjectLocalConfig
   invalidateResolvedConfigCache(projectDir);
 }
 
-/**
- * Update a single field in project configuration
- */
 export function updateProjectConfig<K extends keyof ProjectLocalConfig>(
   projectDir: string,
   key: K,
@@ -260,9 +284,6 @@ export function updateProjectConfig<K extends keyof ProjectLocalConfig>(
   saveProjectConfig(projectDir, config);
 }
 
-/**
- * Set current piece in project config
- */
 export function setCurrentPiece(projectDir: string, piece: string): void {
   updateProjectConfig(projectDir, 'piece', piece);
 }

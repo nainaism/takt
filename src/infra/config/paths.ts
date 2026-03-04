@@ -6,13 +6,17 @@
  */
 
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import type { Language } from '../../core/models/index.js';
 import { getLanguageResourcesDir } from '../resources/index.js';
 
 import type { FacetKind } from '../../faceted-prompting/index.js';
 import { REPERTOIRE_DIR_NAME } from './constants.js';
+import {
+  getProjectConfigDir as resolveProjectConfigDir,
+  getProjectConfigPath as resolveProjectConfigPath,
+} from './project/projectConfigPaths.js';
 
 /** Facet types used in layer resolution */
 export type { FacetKind as FacetType } from '../../faceted-prompting/index.js';
@@ -56,7 +60,7 @@ export function getBuiltinPersonasDir(lang: Language): string {
 
 /** Get project takt config directory (.takt in project) */
 export function getProjectConfigDir(projectDir: string): string {
-  return join(resolve(projectDir), '.takt');
+  return resolveProjectConfigDir(projectDir);
 }
 
 /** Get project pieces directory (.takt/pieces in project) */
@@ -66,7 +70,7 @@ export function getProjectPiecesDir(projectDir: string): string {
 
 /** Get project config file path */
 export function getProjectConfigPath(projectDir: string): string {
-  return join(getProjectConfigDir(projectDir), 'config.yaml');
+  return resolveProjectConfigPath(projectDir);
 }
 
 /** Get project tasks directory */
@@ -132,7 +136,8 @@ export function getRepertoireFacetDir(owner: string, repo: string, facetType: Fa
 export function isPathSafe(basePath: string, targetPath: string): boolean {
   const resolvedBase = resolve(basePath);
   const resolvedTarget = resolve(targetPath);
-  return resolvedTarget.startsWith(resolvedBase);
+  const rel = relative(resolvedBase, resolvedTarget);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 // Re-export project config functions

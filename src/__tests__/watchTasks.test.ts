@@ -96,4 +96,19 @@ describe('watchTasks', () => {
     expect(mockWatch).toHaveBeenCalledTimes(1);
     expect(mockExecuteAndCompleteTask).toHaveBeenCalledTimes(1);
   });
+
+  it('piece設定が未定義の場合はデフォルトpiece名を使う', async () => {
+    mockResolveConfigValue.mockReturnValue(undefined);
+
+    await watchTasks('/project');
+
+    expect(mockInfo).toHaveBeenCalledWith('Piece: default');
+    expect(mockExecuteAndCompleteTask).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      '/project',
+      'default',
+      undefined,
+    );
+  });
 });

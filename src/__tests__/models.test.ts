@@ -577,21 +577,18 @@ describe('GlobalConfigSchema', () => {
     const config = {};
     const result = GlobalConfigSchema.parse(config);
 
-    expect(result.log_level).toBe('info');
     expect(result.provider).toBe('claude');
     expect(result.observability).toBeUndefined();
   });
 
   it('should accept valid config', () => {
     const config = {
-      log_level: 'debug' as const,
       observability: {
         provider_events: false,
       },
     };
 
     const result = GlobalConfigSchema.parse(config);
-    expect(result.log_level).toBe('debug');
     expect(result.observability?.provider_events).toBe(false);
   });
 
@@ -609,22 +606,7 @@ describe('GlobalConfigSchema', () => {
     expect(provider?.network_access).toBe(true);
   });
 
-  it('should parse persona_providers entry with provider object block', () => {
-    const result = GlobalConfigSchema.parse({
-      persona_providers: {
-        coder: {
-          type: 'opencode',
-          model: 'openai/gpt-5',
-        },
-      },
-    } as unknown);
-    const personaProviders = (result as Record<string, unknown>).persona_providers as Record<string, unknown> | undefined;
-    const coder = personaProviders?.coder as Record<string, unknown> | undefined;
-    expect(coder?.type).toBe('opencode');
-    expect(coder?.model).toBe('openai/gpt-5');
-  });
-
-  it('should reject persona_providers provider object block with provider options', () => {
+  it('should reject persona_providers because it is project-local only', () => {
     expect(() => GlobalConfigSchema.parse({
       persona_providers: {
         coder: {

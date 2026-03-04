@@ -20,7 +20,7 @@ vi.mock('../infra/config/paths.js', () => ({
   getProjectCwd: vi.fn(),
 }));
 
-import { GlobalConfigManager } from '../infra/config/global/globalConfig.js';
+import { GlobalConfigManager } from '../infra/config/global/globalConfigCore.js';
 
 describe('globalConfig', () => {
   let testDir: string;

@@ -3,7 +3,7 @@
  */
 
 import { callCopilot, callCopilotCustom, type CopilotCallOptions } from '../copilot/index.js';
-import { resolveCopilotGithubToken, resolveCopilotCliPath, loadProjectConfig } from '../config/index.js';
+import { resolveCopilotGithubToken, resolveCopilotCliPath } from '../config/index.js';
 import { createLogger } from '../../shared/utils/index.js';
 import type { AgentResponse } from '../../core/models/index.js';
 import type { AgentSetup, Provider, ProviderAgent, ProviderCallOptions } from './types.js';
@@ -21,7 +21,6 @@ function toCopilotOptions(options: ProviderCallOptions): CopilotCallOptions {
     log.info('Copilot provider does not support outputSchema; ignoring');
   }
 
-  const projectConfig = loadProjectConfig(options.cwd);
   return {
     cwd: options.cwd,
     abortSignal: options.abortSignal,
@@ -30,7 +29,7 @@ function toCopilotOptions(options: ProviderCallOptions): CopilotCallOptions {
     permissionMode: options.permissionMode,
     onStream: options.onStream,
     copilotGithubToken: options.copilotGithubToken ?? resolveCopilotGithubToken(),
-    copilotCliPath: resolveCopilotCliPath(projectConfig),
+    copilotCliPath: resolveCopilotCliPath(),
   };
 }
 

@@ -505,7 +505,7 @@ export async function selectPiece(
 ): Promise<string | null> {
   const fallbackToDefault = options?.fallbackToDefault !== false;
   const categoryConfig = getPieceCategories(cwd);
-  const currentPiece = resolveConfigValue(cwd, 'piece');
+  const currentPiece = resolveConfigValue(cwd, 'piece') ?? DEFAULT_PIECE_NAME;
 
   if (categoryConfig) {
     const allPieces = loadAllPiecesWithSources(cwd);

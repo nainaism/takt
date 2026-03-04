@@ -13,6 +13,7 @@ import { needsStatusJudgmentPhase } from '../../core/piece/index.js';
 import type { InstructionContext } from '../../core/piece/instruction/instruction-context.js';
 import type { Language } from '../../core/models/types.js';
 import { header, info, error, blankLine } from '../../shared/ui/index.js';
+import { DEFAULT_PIECE_NAME } from '../../shared/constants.js';
 
 /**
  * Preview all prompts for a piece.
@@ -21,7 +22,7 @@ import { header, info, error, blankLine } from '../../shared/ui/index.js';
  * the Phase 1, Phase 2, and Phase 3 prompts with sample variable values.
  */
 export async function previewPrompts(cwd: string, pieceIdentifier?: string): Promise<void> {
-  const identifier = pieceIdentifier ?? resolvePieceConfigValue(cwd, 'piece');
+  const identifier = pieceIdentifier ?? resolvePieceConfigValue(cwd, 'piece') ?? DEFAULT_PIECE_NAME;
   const config = loadPieceByIdentifier(identifier, cwd);
 
   if (!config) {

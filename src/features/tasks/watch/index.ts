@@ -18,13 +18,14 @@ import { executeAndCompleteTask } from '../execute/taskExecution.js';
 import { EXIT_SIGINT } from '../../../shared/exitCodes.js';
 import { ShutdownManager } from '../execute/shutdownManager.js';
 import type { TaskExecutionOptions } from '../execute/types.js';
+import { DEFAULT_PIECE_NAME } from '../../../shared/constants.js';
 
 /**
  * Watch for tasks and execute them as they appear.
  * Runs until Ctrl+C.
  */
 export async function watchTasks(cwd: string, options?: TaskExecutionOptions): Promise<void> {
-  const pieceName = resolveConfigValue(cwd, 'piece');
+  const pieceName = resolveConfigValue(cwd, 'piece') ?? DEFAULT_PIECE_NAME;
   const taskRunner = new TaskRunner(cwd);
   const watcher = new TaskWatcher(cwd);
   const recovered = taskRunner.recoverInterruptedRunningTasks();

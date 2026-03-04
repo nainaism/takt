@@ -83,74 +83,94 @@ export interface NotificationSoundEventsConfig {
 
 /** Persisted global configuration for ~/.takt/config.yaml */
 export interface PersistedGlobalConfig {
+  /**
+   * このインターフェースにはマシン/ユーザー固有の設定のみを定義する。
+   * プロジェクト単位で変えたい設定は ProjectConfig に追加すること。
+   * グローバル専用フィールドを追加する場合は @globalOnly を付ける。
+   */
+  /** @globalOnly */
   language: Language;
-  logLevel: 'debug' | 'info' | 'warn' | 'error';
   provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
   model?: string;
   /** Default piece name for new tasks (resolved via config layers: project > global > 'default') */
   piece?: string;
+  /** @globalOnly */
   observability?: ObservabilityConfig;
   analytics?: AnalyticsConfig;
+  /** @globalOnly */
   /** Directory for shared clones (worktree_dir in config). If empty, uses ../{clone-name} relative to project */
   worktreeDir?: string;
   /** Auto-create PR after worktree execution (default: prompt in interactive mode) */
   autoPr?: boolean;
   /** Create PR as draft (default: prompt in interactive mode when autoPr is true) */
   draftPr?: boolean;
+  /** @globalOnly */
   /** List of builtin piece/agent names to exclude from fallback loading */
   disabledBuiltins?: string[];
+  /** @globalOnly */
   /** Enable builtin pieces from builtins/{lang}/pieces */
   enableBuiltinPieces?: boolean;
+  /** @globalOnly */
   /** Anthropic API key for Claude Code SDK (overridden by TAKT_ANTHROPIC_API_KEY env var) */
   anthropicApiKey?: string;
+  /** @globalOnly */
   /** OpenAI API key for Codex SDK (overridden by TAKT_OPENAI_API_KEY env var) */
   openaiApiKey?: string;
+  /** @globalOnly */
+  /** Gemini API key (overridden by TAKT_GEMINI_API_KEY env var) */
+  geminiApiKey?: string;
+  /** @globalOnly */
+  /** Google API key (overridden by TAKT_GOOGLE_API_KEY env var) */
+  googleApiKey?: string;
+  /** @globalOnly */
+  /** Groq API key (overridden by TAKT_GROQ_API_KEY env var) */
+  groqApiKey?: string;
+  /** @globalOnly */
+  /** OpenRouter API key (overridden by TAKT_OPENROUTER_API_KEY env var) */
+  openrouterApiKey?: string;
+  /** @globalOnly */
   /** External Codex CLI path for Codex SDK override (overridden by TAKT_CODEX_CLI_PATH env var) */
   codexCliPath?: string;
+  /** @globalOnly */
   /** External Claude Code CLI path (overridden by TAKT_CLAUDE_CLI_PATH env var) */
   claudeCliPath?: string;
+  /** @globalOnly */
   /** External cursor-agent CLI path (overridden by TAKT_CURSOR_CLI_PATH env var) */
   cursorCliPath?: string;
+  /** @globalOnly */
   /** External Copilot CLI path (overridden by TAKT_COPILOT_CLI_PATH env var) */
   copilotCliPath?: string;
+  /** @globalOnly */
   /** Copilot GitHub token (overridden by TAKT_COPILOT_GITHUB_TOKEN env var) */
   copilotGithubToken?: string;
+  /** @globalOnly */
   /** OpenCode API key for OpenCode SDK (overridden by TAKT_OPENCODE_API_KEY env var) */
   opencodeApiKey?: string;
+  /** @globalOnly */
   /** Cursor API key for Cursor Agent CLI/API (overridden by TAKT_CURSOR_API_KEY env var) */
   cursorApiKey?: string;
-  /** Pipeline execution settings */
-  pipeline?: PipelineConfig;
-  /** Minimal output mode for CI - suppress AI output to prevent sensitive information leaks */
-  minimalOutput?: boolean;
+  /** @globalOnly */
   /** Path to bookmarks file (default: ~/.takt/preferences/bookmarks.yaml) */
   bookmarksFile?: string;
+  /** @globalOnly */
   /** Path to piece categories file (default: ~/.takt/preferences/piece-categories.yaml) */
   pieceCategoriesFile?: string;
-  /** Per-persona provider and model overrides (e.g., { coder: { provider: 'codex', model: 'o3-mini' } }) */
-  personaProviders?: Record<string, PersonaProviderEntry>;
   /** Global provider-specific options (lowest priority) */
   providerOptions?: MovementProviderOptions;
   /** Provider-specific permission profiles */
   providerProfiles?: ProviderPermissionProfiles;
   /** Global runtime environment defaults (can be overridden by piece runtime) */
   runtime?: PieceRuntimeConfig;
-  /** Branch name generation strategy: 'romaji' (fast, default) or 'ai' (slow) */
-  branchNameStrategy?: 'romaji' | 'ai';
+  /** @globalOnly */
   /** Prevent macOS idle sleep during takt execution using caffeinate (default: false) */
   preventSleep?: boolean;
+  /** @globalOnly */
   /** Enable notification sounds (default: true when undefined) */
   notificationSound?: boolean;
+  /** @globalOnly */
   /** Notification sound toggles per event timing */
   notificationSoundEvents?: NotificationSoundEventsConfig;
-  /** Number of movement previews to inject into interactive mode (0 to disable, max 10) */
-  interactivePreviewMovements?: number;
-  /** Verbose output mode */
-  verbose: boolean;
-  /** Number of tasks to run concurrently in takt run (default: 1 = sequential) */
-  concurrency: number;
-  /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
-  taskPollIntervalMs: number;
+  /** @globalOnly */
   /** Opt-in: fetch remote before cloning to keep clones up-to-date (default: false) */
   autoFetch: boolean;
   /** Base branch to clone from (default: current branch) */
@@ -162,13 +182,31 @@ export interface PersistedGlobalConfig {
 /** Project-level configuration */
 export interface ProjectConfig {
   piece?: string;
+  verbose?: boolean;
   provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
   model?: string;
+  analytics?: AnalyticsConfig;
+  autoPr?: boolean;
+  draftPr?: boolean;
   providerOptions?: MovementProviderOptions;
   /** Provider-specific permission profiles */
   providerProfiles?: ProviderPermissionProfiles;
+  /** Project log level */
+  logLevel?: 'debug' | 'info' | 'warn' | 'error';
+  /** Pipeline execution settings */
+  pipeline?: PipelineConfig;
+  /** Per-persona provider/model overrides */
+  personaProviders?: Record<string, PersonaProviderEntry>;
+  /** Branch name generation strategy */
+  branchNameStrategy?: 'romaji' | 'ai';
+  /** Minimal output mode */
+  minimalOutput?: boolean;
   /** Number of tasks to run concurrently in takt run (1-10) */
   concurrency?: number;
+  /** Polling interval in ms for task pickup */
+  taskPollIntervalMs?: number;
+  /** Number of movement previews in interactive mode */
+  interactivePreviewMovements?: number;
   /** Base branch to clone from (overrides global baseBranch) */
   baseBranch?: string;
   /** Piece-level overrides (quality_gates, etc.) */

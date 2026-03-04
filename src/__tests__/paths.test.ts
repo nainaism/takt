@@ -10,6 +10,7 @@ describe('isPathSafe', () => {
   it('should reject paths outside base directory', () => {
     expect(isPathSafe('/home/user/project', '/home/user/other/file.ts')).toBe(false);
     expect(isPathSafe('/home/user/project', '/etc/passwd')).toBe(false);
+    expect(isPathSafe('/home/user/project', '/home/user/project_malicious/file.ts')).toBe(false);
   });
 
   it('should reject directory traversal attempts', () => {
