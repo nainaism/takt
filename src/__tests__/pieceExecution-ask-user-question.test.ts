@@ -16,6 +16,7 @@ const { MockPieceEngine } = vi.hoisted(() => {
 
   class MockPieceEngine extends EE {
     static lastInstance: MockPieceEngine;
+    static triggerIterationLimit = false;
     readonly receivedOptions: Record<string, unknown>;
     private readonly config: PieceConfig;
 
@@ -30,6 +31,23 @@ const { MockPieceEngine } = vi.hoisted(() => {
 
     async run(): Promise<{ status: string; iteration: number }> {
       const firstStep = this.config.movements[0];
+      if (MockPieceEngine.triggerIterationLimit) {
+        if (!firstStep) {
+          throw new Error('Test fixture requires at least one movement');
+        }
+        const onIterationLimit = this.receivedOptions.onIterationLimit as
+          | ((request: { currentIteration: number; maxMovements: number; currentMovement: string }) => Promise<number | null>)
+          | undefined;
+        if (onIterationLimit) {
+          await onIterationLimit({
+            currentIteration: 1,
+            maxMovements: this.config.maxMovements,
+            currentMovement: firstStep.name,
+          });
+        }
+        this.emit('piece:abort', { status: 'aborted', iteration: 1 }, 'Reached max movements');
+        return { status: 'aborted', iteration: 1 };
+      }
       if (firstStep) {
         this.emit('movement:start', firstStep, 1, firstStep.instructionTemplate, { provider: undefined, model: undefined });
       }
@@ -140,6 +158,7 @@ vi.mock('../shared/exitCodes.js', () => ({
 }));
 
 import { executePiece } from '../features/tasks/execute/pieceExecution.js';
+import { selectOption } from '../shared/prompt/index.js';
 
 function makeConfig(): PieceConfig {
   return {
@@ -162,6 +181,7 @@ function makeConfig(): PieceConfig {
 describe('executePiece AskUserQuestion deny handler wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    MockPieceEngine.triggerIterationLimit = false;
   });
 
   it('should pass onAskUserQuestion handler to PieceEngine', async () => {
@@ -196,5 +216,26 @@ describe('executePiece AskUserQuestion deny handler wiring', () => {
 
     // Then: piece completes successfully
     expect(result.success).toBe(true);
+  });
+
+  it('should mark exceeded without prompting even when interactiveUserInput is true', async () => {
+    // Given: mock engine reaches iteration limit immediately
+    MockPieceEngine.triggerIterationLimit = true;
+
+    // When: executePiece runs in interactive mode
+    const result = await executePiece(makeConfig(), 'task', '/tmp/project', {
+      projectCwd: '/tmp/project',
+      interactiveUserInput: true,
+    });
+
+    // Then: no extension prompt appears; execution is marked as exceeded
+    expect(vi.mocked(selectOption)).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.exceeded).toBe(true);
+    expect(result.exceededInfo).toEqual({
+      currentMovement: 'implement',
+      newMaxMovements: 10,
+      currentIteration: 1,
+    });
   });
 });

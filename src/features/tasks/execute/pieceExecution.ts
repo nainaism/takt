@@ -139,15 +139,13 @@ export async function executePiece(
     out,
     displayRef,
     shouldNotifyIterationLimit,
-    !interactiveUserInput
-      ? (request) => {
-          exceededInfo = {
-            currentMovement: request.currentMovement,
-            newMaxMovements: request.maxMovements + pieceConfig.maxMovements,
-            currentIteration: request.currentIteration,
-          };
-        }
-      : undefined,
+    (request) => {
+      exceededInfo = {
+        currentMovement: request.currentMovement,
+        newMaxMovements: request.maxMovements + pieceConfig.maxMovements,
+        currentIteration: request.currentIteration,
+      };
+    },
   );
   const onUserInput = interactiveUserInput ? createUserInputHandler(out, displayRef) : undefined;
 
