@@ -1,4 +1,4 @@
-name: backend-cqrs-review
+name: review-backend-cqrs
 description: CQRS+ES特化レビュー（構造・モジュール化・ドメインモデル・セキュリティ・QA）
 piece_config:
   provider_options:

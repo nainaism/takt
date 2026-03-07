@@ -1,13 +1,26 @@
-name: dual-cqrs-review
-description: Frontend + CQRS+ES focused review (structure, modularization, domain model, component design, security, QA)
+name: review-fix-takt-default
+description: "TAKT-focused multi-perspective review + fix loop (6 reviewers including AI antipattern review)"
 piece_config:
   provider_options:
     codex:
       network_access: true
     opencode:
       network_access: true
-max_movements: 10
+max_movements: 30
 initial_movement: gather
+loop_monitors:
+  - cycle:
+      - reviewers
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction_template: loop-monitor-reviewers-fix
+      rules:
+        - condition: Healthy (progress being made)
+          next: reviewers
+        - condition: Unproductive (repeated findings, fixes not applied)
+          next: supervise
 
 movements:
   - name: gather
@@ -30,8 +43,12 @@ movements:
     rules:
       - condition: Review target information gathered
         next: reviewers
-      - condition: Unable to identify review target, insufficient information
+      - condition: Cannot identify review target, insufficient info
         next: ABORT
+        appendix: |
+          Clarifications needed:
+          - {Question 1}
+          - {Question 2}
 
   - name: reviewers
     parallel:
@@ -41,67 +58,21 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - frontend
-          - backend
+          - takt
         provider_options:
           claude:
             allowed_tools:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-arch
         output_contracts:
           report:
-            - name: architect-review.md
+            - name: architecture-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: cqrs-es-review
-        edit: false
-        persona: cqrs-es-reviewer
-        policy: review
-        knowledge:
-          - cqrs-es
-          - backend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-cqrs-es
-        output_contracts:
-          report:
-            - name: cqrs-es-review.md
-              format: cqrs-es-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: frontend-review
-        edit: false
-        persona: frontend-reviewer
-        policy: review
-        knowledge: frontend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-frontend
-        output_contracts:
-          report:
-            - name: frontend-review.md
-              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -117,6 +88,7 @@ movements:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-security
@@ -140,6 +112,7 @@ movements:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-qa
@@ -151,11 +124,111 @@ movements:
           - condition: approved
           - condition: needs_fix
 
+      - name: testing-review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: ai-antipattern-review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-review
+        output_contracts:
+          report:
+            - name: ai-review.md
+              format: ai-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: requirements-review
+        edit: false
+        persona: requirements-reviewer
+        policy: review
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-requirements
+        output_contracts:
+          report:
+            - name: requirements-review.md
+              format: requirements-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
     rules:
       - condition: all("approved")
         next: supervise
       - condition: any("needs_fix")
-        next: supervise
+        next: fix
+
+  - name: fix
+    edit: true
+    persona: coder
+    policy:
+      - coding
+      - testing
+    knowledge:
+      - takt
+      - architecture
+      - security
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    rules:
+      - condition: Fix complete
+        next: reviewers
+      - condition: Cannot proceed, insufficient info
+        next: ABORT
 
   - name: supervise
     edit: false
@@ -167,10 +240,16 @@ movements:
           - Read
           - Glob
           - Grep
+          - Bash
           - WebSearch
           - WebFetch
-    pass_previous_response: false
     instruction: supervise
+    pass_previous_response: false
+    rules:
+      - condition: All checks passed
+        next: COMPLETE
+      - condition: Requirements unmet, tests failing, build errors
+        next: ABORT
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -178,6 +257,3 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
-    rules:
-      - condition: Review integration complete
-        next: COMPLETE

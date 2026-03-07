@@ -1,26 +1,13 @@
-name: takt-default-review-fix
-description: "TAKT development code review + fix loop (5 parallel reviewers: architecture, security, QA, testing, requirements — with iterative fixes)"
+name: review-takt-default
+description: TAKT開発向け多角レビュー（AIアンチパターン含む6観点レビュー）
 piece_config:
   provider_options:
     codex:
       network_access: true
     opencode:
       network_access: true
-max_movements: 30
+max_movements: 10
 initial_movement: gather
-loop_monitors:
-  - cycle:
-      - reviewers
-      - fix
-    threshold: 3
-    judge:
-      persona: supervisor
-      instruction_template: loop-monitor-reviewers-fix
-      rules:
-        - condition: Healthy (progress being made)
-          next: reviewers
-        - condition: Unproductive (repeated findings, fixes not applied)
-          next: supervise
 
 movements:
   - name: gather
@@ -41,14 +28,14 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: Review target information gathered
+      - condition: レビュー対象の情報収集完了
         next: reviewers
-      - condition: Cannot identify review target, insufficient info
+      - condition: レビュー対象を特定できない、情報不足
         next: ABORT
         appendix: |
-          Clarifications needed:
-          - {Question 1}
-          - {Question 2}
+          確認事項:
+          - {質問1}
+          - {質問2}
 
   - name: reviewers
     parallel:
@@ -148,6 +135,30 @@ movements:
           - condition: approved
           - condition: needs_fix
 
+      - name: ai-antipattern-review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-review
+        output_contracts:
+          report:
+            - name: ai-review.md
+              format: ai-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
       - name: requirements-review
         edit: false
         persona: requirements-reviewer
@@ -174,37 +185,7 @@ movements:
       - condition: all("approved")
         next: supervise
       - condition: any("needs_fix")
-        next: fix
-
-  - name: fix
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - takt
-      - architecture
-      - security
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    required_permission_mode: edit
-    pass_previous_response: false
-    instruction: fix
-    rules:
-      - condition: Fix complete
-        next: reviewers
-      - condition: Cannot proceed, insufficient info
-        next: ABORT
+        next: supervise
 
   - name: supervise
     edit: false
@@ -216,20 +197,71 @@ movements:
           - Read
           - Glob
           - Grep
-          - Bash
           - WebSearch
           - WebFetch
-    instruction: supervise
     pass_previous_response: false
     rules:
-      - condition: All checks passed
+      - condition: レビュー統合完了
         next: COMPLETE
-      - condition: Requirements unmet, tests failing, build errors
-        next: ABORT
+    instruction_template: |
+      ## レビュー結果
+      {previous_response}
+
+      **これはレビュー専用ピースです。** テスト実行やビルドは行わないでください。
+      レビュー結果を統合し、最終サマリーを作成する役割です。
+
+      **やること:**
+      1. Report Directory内の全レビューレポートを読む
+         - `00-review-target.md`（レビュー対象情報）
+         - `01-architecture-review.md`（アーキテクチャレビュー）
+         - `02-security-review.md`（セキュリティレビュー）
+         - `03-qa-review.md`（QAレビュー）
+         - `04-testing-review.md`（テストレビュー）
+         - `05-ai-review.md`（AIアンチパターンレビュー）
+         - `06-requirements-review.md`（要件充足レビュー）
+      2. 5つのレビュー結果を統合
+      3. 統合レビューサマリーと総合判定を作成
     output_contracts:
       report:
-        - name: supervisor-validation.md
-          format: supervisor-validation
-        - name: summary.md
-          format: summary
-          use_judge: false
+        - name: review-summary.md
+          format: |
+            ```markdown
+            # レビューサマリー
+
+            ## 総合判定: APPROVE / REJECT
+
+            ## サマリー
+            {2-3文で全レビュー結果を統合}
+
+            ## レビュー結果
+            | レビュー | 結果 | 主要な発見 |
+            |---------|------|-----------|
+            | アーキテクチャ | APPROVE/REJECT | {概要} |
+            | セキュリティ | APPROVE/REJECT | {概要} |
+            | QA | APPROVE/REJECT | {概要} |
+            | テスト | APPROVE/REJECT | {概要} |
+            | AIアンチパターン | APPROVE/REJECT | {概要} |
+            | 要件充足 | APPROVE/REJECT | {概要} |
+
+            ## 今回の指摘（new）
+            | # | finding_id | 重大度 | ソース | 場所 | 問題 | 修正案 |
+            |---|------------|--------|--------|------|------|--------|
+            | 1 | SUM-NEW-src-file-L42 | High | セキュリティ | `file:line` | 説明 | 提案 |
+
+            ## 継続指摘（persists）
+            | # | finding_id | ソース | 前回根拠 | 今回根拠 | 問題 |
+            |---|------------|--------|----------|----------|------|
+            | 1 | SUM-PERSIST-src-file-L77 | アーキテクチャ | `file:line` | `file:line` | 説明 |
+
+            ## 解消済み（resolved）
+            | finding_id | ソース | 解消根拠 |
+            |------------|--------|----------|
+            | SUM-RESOLVED-src-file-L10 | QA | `file:line` |
+
+            ## 改善提案
+            - {全レビューからの統合提案}
+
+            ## REJECT判定条件
+            - `new` または `persists` が1件以上ある場合のみ REJECT 可
+            - `finding_id` なしの指摘は無効
+            ```

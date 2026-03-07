@@ -1,5 +1,5 @@
-name: dual-cqrs-review
-description: フロントエンド＋CQRS+ES特化レビュー（構造・モジュール化・ドメインモデル・コンポーネント設計・セキュリティ・QA）
+name: review-dual
+description: Frontend + backend focused review (structure, modularization, component design, security, QA)
 piece_config:
   provider_options:
     codex:
@@ -28,9 +28,9 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: レビュー対象の情報収集完了
+      - condition: Review target information gathered
         next: reviewers
-      - condition: レビュー対象を特定できない、情報不足
+      - condition: Unable to identify review target, insufficient information
         next: ABORT
 
   - name: reviewers
@@ -56,30 +56,6 @@ movements:
           report:
             - name: architect-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: cqrs-es-review
-        edit: false
-        persona: cqrs-es-reviewer
-        policy: review
-        knowledge:
-          - cqrs-es
-          - backend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-cqrs-es
-        output_contracts:
-          report:
-            - name: cqrs-es-review.md
-              format: cqrs-es-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -179,5 +155,5 @@ movements:
           format: summary
           use_judge: false
     rules:
-      - condition: レビュー統合完了
+      - condition: Review integration complete
         next: COMPLETE

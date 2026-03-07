@@ -1,5 +1,5 @@
-name: backend-cqrs-review-fix
-description: CQRS+ES特化レビュー＋修正ループ（構造・モジュール化・ドメインモデル・セキュリティ・QA）
+name: review-fix-default
+description: Multi-perspective review + fix loop (architecture, security, QA, testing, requirements — 5 parallel reviewers with iterative fixes)
 piece_config:
   provider_options:
     codex:
@@ -17,9 +17,9 @@ loop_monitors:
       persona: supervisor
       instruction_template: loop-monitor-reviewers-fix
       rules:
-        - condition: 健全（進捗あり）
+        - condition: Healthy (progress being made)
           next: reviewers
-        - condition: 非生産的（同じ指摘の反復・修正未反映）
+        - condition: Unproductive (repeated findings, fixes not applied)
           next: supervise
 
 movements:
@@ -41,10 +41,14 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: レビュー対象の情報収集完了
+      - condition: Review target information gathered
         next: reviewers
-      - condition: レビュー対象を特定できない、情報不足
+      - condition: Cannot identify review target, insufficient info
         next: ABORT
+        appendix: |
+          Clarifications needed:
+          - {Question 1}
+          - {Question 2}
 
   - name: reviewers
     parallel:
@@ -52,46 +56,21 @@ movements:
         edit: false
         persona: architecture-reviewer
         policy: review
-        knowledge:
-          - architecture
-          - backend
+        knowledge: architecture
         provider_options:
           claude:
             allowed_tools:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-arch
         output_contracts:
           report:
-            - name: architect-review.md
+            - name: architecture-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: cqrs-es-review
-        edit: false
-        persona: cqrs-es-reviewer
-        policy: review
-        knowledge:
-          - cqrs-es
-          - backend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-cqrs-es
-        output_contracts:
-          report:
-            - name: cqrs-es-review.md
-              format: cqrs-es-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -107,6 +86,7 @@ movements:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-security
@@ -130,6 +110,7 @@ movements:
               - Read
               - Glob
               - Grep
+              - Bash
               - WebSearch
               - WebFetch
         instruction: review-qa
@@ -137,6 +118,52 @@ movements:
           report:
             - name: qa-review.md
               format: qa-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: testing-review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: requirements-review
+        edit: false
+        persona: requirements-reviewer
+        policy: review
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: review-requirements
+        output_contracts:
+          report:
+            - name: requirements-review.md
+              format: requirements-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -154,10 +181,8 @@ movements:
       - coding
       - testing
     knowledge:
-      - backend
-      - cqrs-es
-      - security
       - architecture
+      - security
     provider_options:
       claude:
         allowed_tools:
@@ -173,14 +198,14 @@ movements:
     pass_previous_response: false
     instruction: fix
     rules:
-      - condition: 修正が完了した
+      - condition: Fixes complete
         next: reviewers
-      - condition: 修正を進行できない
+      - condition: Unable to proceed with fixes
         next: supervise
 
   - name: supervise
     edit: false
-    persona: dual-supervisor
+    persona: supervisor
     policy: review
     provider_options:
       claude:
@@ -193,9 +218,9 @@ movements:
     instruction: supervise
     pass_previous_response: false
     rules:
-      - condition: すべての検証が完了し、マージ可能な状態である
+      - condition: All validations complete, ready to merge
         next: COMPLETE
-      - condition: 問題が検出された
+      - condition: Issues detected
         next: fix_supervisor
     output_contracts:
       report:
@@ -212,10 +237,8 @@ movements:
       - coding
       - testing
     knowledge:
-      - backend
-      - cqrs-es
-      - security
       - architecture
+      - security
     provider_options:
       claude:
         allowed_tools:
@@ -230,7 +253,7 @@ movements:
     instruction: fix-supervisor
     pass_previous_response: false
     rules:
-      - condition: 監督者の指摘に対する修正が完了した
+      - condition: Fixes for supervisor findings complete
         next: supervise
-      - condition: 修正を進行できない
+      - condition: Unable to proceed with fixes
         next: supervise

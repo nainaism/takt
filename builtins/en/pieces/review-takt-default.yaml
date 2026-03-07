@@ -1,5 +1,5 @@
-name: review
-description: Multi-perspective Code Review - reviews changes in parallel from 5 perspectives and outputs consolidated results
+name: review-takt-default
+description: "TAKT-focused multi-perspective review (6 reviewers including AI antipattern review)"
 piece_config:
   provider_options:
     codex:
@@ -43,7 +43,9 @@ movements:
         edit: false
         persona: architecture-reviewer
         policy: review
-        knowledge: architecture
+        knowledge:
+          - architecture
+          - takt
         provider_options:
           claude:
             allowed_tools:
@@ -133,6 +135,30 @@ movements:
           - condition: approved
           - condition: needs_fix
 
+      - name: ai-antipattern-review
+        edit: false
+        persona: ai-antipattern-reviewer
+        policy:
+          - review
+          - ai-antipattern
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        instruction: ai-review
+        output_contracts:
+          report:
+            - name: ai-review.md
+              format: ai-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
       - name: requirements-review
         edit: false
         persona: requirements-reviewer
@@ -191,8 +217,9 @@ movements:
          - `02-security-review.md` (Security review)
          - `03-qa-review.md` (QA review)
          - `04-testing-review.md` (Testing review)
-         - `05-requirements-review.md` (Requirements review)
-      2. Synthesize the 5 review results
+         - `05-ai-review.md` (AI antipattern review)
+         - `06-requirements-review.md` (Requirements review)
+      2. Synthesize the 6 review results
       3. Produce a consolidated review summary with overall verdict
 
       **Review Summary output contract:**
@@ -211,6 +238,7 @@ movements:
       | Security | APPROVE/REJECT | {Brief finding} |
       | QA | APPROVE/REJECT | {Brief finding} |
       | Testing | APPROVE/REJECT | {Brief finding} |
+      | AI Antipattern | APPROVE/REJECT | {Brief finding} |
       | Requirements | APPROVE/REJECT | {Brief finding} |
 
       ## Issues Requiring Attention
@@ -240,6 +268,7 @@ movements:
             | Security | APPROVE/REJECT | {Overview} |
             | QA | APPROVE/REJECT | {Overview} |
             | Testing | APPROVE/REJECT | {Overview} |
+            | AI Antipattern | APPROVE/REJECT | {Overview} |
             | Requirements | APPROVE/REJECT | {Overview} |
 
             ## Current Iteration Findings (new)

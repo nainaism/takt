@@ -1,26 +1,13 @@
-name: dual-review-fix
-description: Frontend + backend focused review + fix loop (structure, modularization, component design, security, QA)
+name: review-backend
+description: バックエンド特化レビュー（構造・モジュール化・ヘキサゴナルアーキテクチャ・セキュリティ・QA）
 piece_config:
   provider_options:
     codex:
       network_access: true
     opencode:
       network_access: true
-max_movements: 30
+max_movements: 10
 initial_movement: gather
-loop_monitors:
-  - cycle:
-      - reviewers
-      - fix
-    threshold: 3
-    judge:
-      persona: supervisor
-      instruction_template: loop-monitor-reviewers-fix
-      rules:
-        - condition: Healthy (progress being made)
-          next: reviewers
-        - condition: Unproductive (repeated findings, fixes not applied)
-          next: supervise
 
 movements:
   - name: gather
@@ -41,9 +28,9 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: Review target information gathered
+      - condition: レビュー対象の情報収集完了
         next: reviewers
-      - condition: Unable to identify review target, insufficient information
+      - condition: レビュー対象を特定できない、情報不足
         next: ABORT
 
   - name: reviewers
@@ -54,7 +41,6 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - frontend
           - backend
         provider_options:
           claude:
@@ -69,28 +55,6 @@ movements:
           report:
             - name: architect-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: frontend-review
-        edit: false
-        persona: frontend-reviewer
-        policy: review
-        knowledge: frontend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-frontend
-        output_contracts:
-          report:
-            - name: frontend-review.md
-              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -144,42 +108,11 @@ movements:
       - condition: all("approved")
         next: supervise
       - condition: any("needs_fix")
-        next: fix
-
-  - name: fix
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - frontend
-      - backend
-      - security
-      - architecture
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    required_permission_mode: edit
-    pass_previous_response: false
-    instruction: fix
-    rules:
-      - condition: Fixes complete
-        next: reviewers
-      - condition: Unable to proceed with fixes
         next: supervise
 
   - name: supervise
     edit: false
-    persona: dual-supervisor
+    persona: supervisor
     policy: review
     provider_options:
       claude:
@@ -189,13 +122,8 @@ movements:
           - Grep
           - WebSearch
           - WebFetch
-    instruction: supervise
     pass_previous_response: false
-    rules:
-      - condition: All validations complete, ready to merge
-        next: COMPLETE
-      - condition: Issues detected
-        next: fix_supervisor
+    instruction: supervise
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -203,33 +131,6 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
-
-  - name: fix_supervisor
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - frontend
-      - backend
-      - security
-      - architecture
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    instruction: fix-supervisor
-    pass_previous_response: false
     rules:
-      - condition: Fixes for supervisor findings complete
-        next: supervise
-      - condition: Unable to proceed with fixes
-        next: supervise
+      - condition: レビュー統合完了
+        next: COMPLETE

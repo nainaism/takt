@@ -1,26 +1,13 @@
-name: dual-cqrs-review-fix
-description: Frontend + CQRS+ES focused review + fix loop (structure, modularization, domain model, component design, security, QA)
+name: review-backend-cqrs
+description: CQRS+ES focused review (structure, modularization, domain model, security, QA)
 piece_config:
   provider_options:
     codex:
       network_access: true
     opencode:
       network_access: true
-max_movements: 30
+max_movements: 10
 initial_movement: gather
-loop_monitors:
-  - cycle:
-      - reviewers
-      - fix
-    threshold: 3
-    judge:
-      persona: supervisor
-      instruction_template: loop-monitor-reviewers-fix
-      rules:
-        - condition: Healthy (progress being made)
-          next: reviewers
-        - condition: Unproductive (repeated findings, fixes not applied)
-          next: supervise
 
 movements:
   - name: gather
@@ -54,7 +41,6 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - frontend
           - backend
         provider_options:
           claude:
@@ -93,28 +79,6 @@ movements:
           report:
             - name: cqrs-es-review.md
               format: cqrs-es-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: frontend-review
-        edit: false
-        persona: frontend-reviewer
-        policy: review
-        knowledge: frontend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-frontend
-        output_contracts:
-          report:
-            - name: frontend-review.md
-              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -168,43 +132,11 @@ movements:
       - condition: all("approved")
         next: supervise
       - condition: any("needs_fix")
-        next: fix
-
-  - name: fix
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - frontend
-      - backend
-      - cqrs-es
-      - security
-      - architecture
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    required_permission_mode: edit
-    pass_previous_response: false
-    instruction: fix
-    rules:
-      - condition: Fixes complete
-        next: reviewers
-      - condition: Unable to proceed with fixes
         next: supervise
 
   - name: supervise
     edit: false
-    persona: dual-supervisor
+    persona: supervisor
     policy: review
     provider_options:
       claude:
@@ -214,13 +146,8 @@ movements:
           - Grep
           - WebSearch
           - WebFetch
-    instruction: supervise
     pass_previous_response: false
-    rules:
-      - condition: All validations complete, ready to merge
-        next: COMPLETE
-      - condition: Issues detected
-        next: fix_supervisor
+    instruction: supervise
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -228,34 +155,6 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
-
-  - name: fix_supervisor
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - frontend
-      - backend
-      - cqrs-es
-      - security
-      - architecture
-    provider_options:
-      claude:
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Write
-          - Bash
-          - WebSearch
-          - WebFetch
-    instruction: fix-supervisor
-    pass_previous_response: false
     rules:
-      - condition: Fixes for supervisor findings complete
-        next: supervise
-      - condition: Unable to proceed with fixes
-        next: supervise
+      - condition: Review integration complete
+        next: COMPLETE

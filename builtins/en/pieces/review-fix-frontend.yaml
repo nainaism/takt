@@ -1,5 +1,5 @@
-name: takt-default-review-fix
-description: TAKT開発コードレビュー＋修正ループ（アーキテクチャ・セキュリティ・QA・テスト・要件の5観点から並列レビューし、指摘を修正する）
+name: review-fix-frontend
+description: Frontend-focused review + fix loop (structure, modularization, component design, security, QA)
 piece_config:
   provider_options:
     codex:
@@ -17,9 +17,9 @@ loop_monitors:
       persona: supervisor
       instruction_template: loop-monitor-reviewers-fix
       rules:
-        - condition: 健全（進捗あり）
+        - condition: Healthy (progress being made)
           next: reviewers
-        - condition: 非生産的（同じ指摘の反復・修正未反映）
+        - condition: Unproductive (repeated findings, fixes not applied)
           next: supervise
 
 movements:
@@ -41,14 +41,10 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: レビュー対象の情報収集完了
+      - condition: Review target information gathered
         next: reviewers
-      - condition: レビュー対象を特定できない、情報不足
+      - condition: Unable to identify review target, insufficient information
         next: ABORT
-        appendix: |
-          確認事項:
-          - {質問1}
-          - {質問2}
 
   - name: reviewers
     parallel:
@@ -58,21 +54,42 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - takt
+          - frontend
         provider_options:
           claude:
             allowed_tools:
               - Read
               - Glob
               - Grep
-              - Bash
               - WebSearch
               - WebFetch
         instruction: review-arch
         output_contracts:
           report:
-            - name: architecture-review.md
+            - name: architect-review.md
               format: architecture-review
+        rules:
+          - condition: approved
+          - condition: needs_fix
+
+      - name: frontend-review
+        edit: false
+        persona: frontend-reviewer
+        policy: review
+        knowledge: frontend
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
+        instruction: review-frontend
+        output_contracts:
+          report:
+            - name: frontend-review.md
+              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -88,7 +105,6 @@ movements:
               - Read
               - Glob
               - Grep
-              - Bash
               - WebSearch
               - WebFetch
         instruction: review-security
@@ -112,7 +128,6 @@ movements:
               - Read
               - Glob
               - Grep
-              - Bash
               - WebSearch
               - WebFetch
         instruction: review-qa
@@ -120,52 +135,6 @@ movements:
           report:
             - name: qa-review.md
               format: qa-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: testing-review
-        edit: false
-        persona: testing-reviewer
-        policy:
-          - review
-          - testing
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - Bash
-              - WebSearch
-              - WebFetch
-        instruction: review-test
-        output_contracts:
-          report:
-            - name: testing-review.md
-              format: testing-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: requirements-review
-        edit: false
-        persona: requirements-reviewer
-        policy: review
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - Bash
-              - WebSearch
-              - WebFetch
-        instruction: review-requirements
-        output_contracts:
-          report:
-            - name: requirements-review.md
-              format: requirements-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -183,9 +152,9 @@ movements:
       - coding
       - testing
     knowledge:
-      - takt
-      - architecture
+      - frontend
       - security
+      - architecture
     provider_options:
       claude:
         allowed_tools:
@@ -201,14 +170,14 @@ movements:
     pass_previous_response: false
     instruction: fix
     rules:
-      - condition: 修正完了
+      - condition: Fixes complete
         next: reviewers
-      - condition: 判断できない、情報不足
-        next: ABORT
+      - condition: Unable to proceed with fixes
+        next: supervise
 
   - name: supervise
     edit: false
-    persona: supervisor
+    persona: dual-supervisor
     policy: review
     provider_options:
       claude:
@@ -216,16 +185,15 @@ movements:
           - Read
           - Glob
           - Grep
-          - Bash
           - WebSearch
           - WebFetch
     instruction: supervise
     pass_previous_response: false
     rules:
-      - condition: すべて問題なし
+      - condition: All validations complete, ready to merge
         next: COMPLETE
-      - condition: 要求未達成、テスト失敗、ビルドエラー
-        next: ABORT
+      - condition: Issues detected
+        next: fix_supervisor
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -233,3 +201,32 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
+
+  - name: fix_supervisor
+    edit: true
+    persona: coder
+    policy:
+      - coding
+      - testing
+    knowledge:
+      - frontend
+      - security
+      - architecture
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    instruction: fix-supervisor
+    pass_previous_response: false
+    rules:
+      - condition: Fixes for supervisor findings complete
+        next: supervise
+      - condition: Unable to proceed with fixes
+        next: supervise

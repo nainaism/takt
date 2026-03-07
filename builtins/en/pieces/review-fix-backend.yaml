@@ -1,5 +1,5 @@
-name: frontend-review-fix
-description: Frontend-focused review + fix loop (structure, modularization, component design, security, QA)
+name: review-fix-backend
+description: Backend-focused review + fix loop (structure, modularization, hexagonal architecture, security, QA)
 piece_config:
   provider_options:
     codex:
@@ -54,7 +54,7 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - frontend
+          - backend
         provider_options:
           claude:
             allowed_tools:
@@ -68,28 +68,6 @@ movements:
           report:
             - name: architect-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: frontend-review
-        edit: false
-        persona: frontend-reviewer
-        policy: review
-        knowledge: frontend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-frontend
-        output_contracts:
-          report:
-            - name: frontend-review.md
-              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -152,7 +130,7 @@ movements:
       - coding
       - testing
     knowledge:
-      - frontend
+      - backend
       - security
       - architecture
     provider_options:
@@ -209,7 +187,7 @@ movements:
       - coding
       - testing
     knowledge:
-      - frontend
+      - backend
       - security
       - architecture
     provider_options:

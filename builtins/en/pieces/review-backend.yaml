@@ -1,5 +1,5 @@
-name: frontend-review
-description: Frontend-focused review (structure, modularization, component design, security, QA)
+name: review-backend
+description: Backend-focused review (structure, modularization, hexagonal architecture, security, QA)
 piece_config:
   provider_options:
     codex:
@@ -41,7 +41,7 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - frontend
+          - backend
         provider_options:
           claude:
             allowed_tools:
@@ -55,28 +55,6 @@ movements:
           report:
             - name: architect-review.md
               format: architecture-review
-        rules:
-          - condition: approved
-          - condition: needs_fix
-
-      - name: frontend-review
-        edit: false
-        persona: frontend-reviewer
-        policy: review
-        knowledge: frontend
-        provider_options:
-          claude:
-            allowed_tools:
-              - Read
-              - Glob
-              - Grep
-              - WebSearch
-              - WebFetch
-        instruction: review-frontend
-        output_contracts:
-          report:
-            - name: frontend-review.md
-              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix

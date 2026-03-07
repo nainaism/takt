@@ -1,13 +1,26 @@
-name: backend-cqrs-review
-description: CQRS+ES focused review (structure, modularization, domain model, security, QA)
+name: review-fix-frontend
+description: フロントエンド特化レビュー＋修正ループ（構造・モジュール化・コンポーネント設計・セキュリティ・QA）
 piece_config:
   provider_options:
     codex:
       network_access: true
     opencode:
       network_access: true
-max_movements: 10
+max_movements: 30
 initial_movement: gather
+loop_monitors:
+  - cycle:
+      - reviewers
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction_template: loop-monitor-reviewers-fix
+      rules:
+        - condition: 健全（進捗あり）
+          next: reviewers
+        - condition: 非生産的（同じ指摘の反復・修正未反映）
+          next: supervise
 
 movements:
   - name: gather
@@ -28,9 +41,9 @@ movements:
         - name: review-target.md
           format: review-gather
     rules:
-      - condition: Review target information gathered
+      - condition: レビュー対象の情報収集完了
         next: reviewers
-      - condition: Unable to identify review target, insufficient information
+      - condition: レビュー対象を特定できない、情報不足
         next: ABORT
 
   - name: reviewers
@@ -41,7 +54,7 @@ movements:
         policy: review
         knowledge:
           - architecture
-          - backend
+          - frontend
         provider_options:
           claude:
             allowed_tools:
@@ -59,13 +72,11 @@ movements:
           - condition: approved
           - condition: needs_fix
 
-      - name: cqrs-es-review
+      - name: frontend-review
         edit: false
-        persona: cqrs-es-reviewer
+        persona: frontend-reviewer
         policy: review
-        knowledge:
-          - cqrs-es
-          - backend
+        knowledge: frontend
         provider_options:
           claude:
             allowed_tools:
@@ -74,11 +85,11 @@ movements:
               - Grep
               - WebSearch
               - WebFetch
-        instruction: review-cqrs-es
+        instruction: review-frontend
         output_contracts:
           report:
-            - name: cqrs-es-review.md
-              format: cqrs-es-review
+            - name: frontend-review.md
+              format: frontend-review
         rules:
           - condition: approved
           - condition: needs_fix
@@ -132,11 +143,41 @@ movements:
       - condition: all("approved")
         next: supervise
       - condition: any("needs_fix")
+        next: fix
+
+  - name: fix
+    edit: true
+    persona: coder
+    policy:
+      - coding
+      - testing
+    knowledge:
+      - frontend
+      - security
+      - architecture
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    required_permission_mode: edit
+    pass_previous_response: false
+    instruction: fix
+    rules:
+      - condition: 修正が完了した
+        next: reviewers
+      - condition: 修正を進行できない
         next: supervise
 
   - name: supervise
     edit: false
-    persona: supervisor
+    persona: dual-supervisor
     policy: review
     provider_options:
       claude:
@@ -146,8 +187,13 @@ movements:
           - Grep
           - WebSearch
           - WebFetch
-    pass_previous_response: false
     instruction: supervise
+    pass_previous_response: false
+    rules:
+      - condition: すべての検証が完了し、マージ可能な状態である
+        next: COMPLETE
+      - condition: 問題が検出された
+        next: fix_supervisor
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -155,6 +201,32 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
+
+  - name: fix_supervisor
+    edit: true
+    persona: coder
+    policy:
+      - coding
+      - testing
+    knowledge:
+      - frontend
+      - security
+      - architecture
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    instruction: fix-supervisor
+    pass_previous_response: false
     rules:
-      - condition: Review integration complete
-        next: COMPLETE
+      - condition: 監督者の指摘に対する修正が完了した
+        next: supervise
+      - condition: 修正を進行できない
+        next: supervise
