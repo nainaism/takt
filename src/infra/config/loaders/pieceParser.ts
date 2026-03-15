@@ -186,8 +186,6 @@ function normalizeArpeggio(
     ? {
         strategy: raw.merge.strategy,
         separator: raw.merge.separator,
-        inlineJs: raw.merge.inline_js,
-        file: raw.merge.file ? resolve(pieceDir, raw.merge.file) : undefined,
       }
     : { strategy: 'concat' };
 
