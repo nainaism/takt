@@ -307,6 +307,25 @@ describe('PieceConfigRawSchema', () => {
     });
   });
 
+  it('should reject non-preset piece-level piece_config.runtime.prepare entries', () => {
+    const config = {
+      name: 'test-piece',
+      piece_config: {
+        runtime: {
+          prepare: ['./setup.sh'],
+        },
+      },
+      movements: [
+        {
+          name: 'implement',
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    expect(() => PieceConfigRawSchema.parse(config)).toThrow();
+  });
+
   it('should allow omitting required_permission_mode', () => {
     const config = {
       name: 'test-piece',

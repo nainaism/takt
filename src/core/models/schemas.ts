@@ -139,15 +139,19 @@ export const RuntimePrepareEntrySchema = z.union([
 ]);
 
 /** Piece-level runtime settings */
+export const PieceRuntimeConfigSchema = z.object({
+  prepare: z.array(RuntimePreparePresetSchema).optional(),
+}).optional();
+
+/** Piece-level provider options schema */
 export const RuntimeConfigSchema = z.object({
   prepare: z.array(RuntimePrepareEntrySchema).optional(),
 }).optional();
 
-/** Piece-level provider options schema */
 export const PieceProviderOptionsSchema = z.object({
   provider: ProviderReferenceSchema.optional(),
   provider_options: MovementProviderOptionsSchema,
-  runtime: RuntimeConfigSchema,
+  runtime: PieceRuntimeConfigSchema,
 }).optional();
 
 /**
