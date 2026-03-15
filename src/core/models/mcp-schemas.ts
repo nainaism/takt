@@ -36,5 +36,12 @@ export const McpServerConfigSchema = z.union([
   McpHttpServerSchema,
 ]);
 
+/** Piece-level MCP server configuration (remote transports only) */
+export const PieceMcpServerConfigSchema = z.union([
+  McpSseServerSchema,
+  McpHttpServerSchema,
+]);
+
 /** MCP servers map: server name → config */
 export const McpServersSchema = z.record(z.string(), McpServerConfigSchema).optional();
+export const PieceMcpServersSchema = z.record(z.string(), PieceMcpServerConfigSchema).optional();

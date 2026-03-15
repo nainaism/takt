@@ -27,7 +27,7 @@ import {
 type RawStep = z.output<typeof PieceMovementRawSchema>;
 import type { MovementProviderOptions } from '../../../core/models/piece-types.js';
 import { normalizeRuntime } from '../configNormalizers.js';
-import type { PieceOverrides } from '../../../core/models/config-types.js';
+import type { PieceMcpServersConfig, PieceOverrides } from '../../../core/models/config-types.js';
 import { applyQualityGateOverrides } from './qualityGateOverrides.js';
 import { loadProjectConfig } from '../project/projectConfig.js';
 import { loadGlobalConfig } from '../global/globalConfig.js';
@@ -241,6 +241,7 @@ function normalizeStepFromRaw(
   context?: FacetResolutionContext,
   projectOverrides?: PieceOverrides,
   globalOverrides?: PieceOverrides,
+  pieceMcpServersPolicy?: PieceMcpServersConfig,
 ): PieceMovement {
   const rules: PieceRule[] | undefined = step.rules?.map(normalizeRule);
 
@@ -278,6 +279,8 @@ function normalizeStepFromRaw(
   const expandedLegacyInstruction = step.instruction_template
     ? resolveRefToContent(step.instruction_template, sections.resolvedInstructions, pieceDir, 'instructions', context)
     : undefined;
+
+  validatePieceMcpServers(step.name, step.mcp_servers, pieceMcpServersPolicy);
 
   const result: PieceMovement = {
     name: step.name,
@@ -320,6 +323,7 @@ function normalizeStepFromRaw(
         context,
         projectOverrides,
         globalOverrides,
+        pieceMcpServersPolicy,
       ),
     );
   }
@@ -379,6 +383,34 @@ function normalizeLoopMonitors(
   }));
 }
 
+function isPieceMcpTransportAllowed(
+  serverConfig: NonNullable<PieceMovement['mcpServers']>[string],
+  policy: PieceMcpServersConfig | undefined,
+): boolean {
+  const transport = serverConfig.type ?? 'stdio';
+  if (transport === 'stdio') return policy?.stdio ?? false;
+  if (transport === 'sse') return policy?.sse ?? true;
+  if (transport === 'http') return policy?.http ?? true;
+  return false;
+}
+
+function validatePieceMcpServers(
+  movementName: string,
+  mcpServers: PieceMovement['mcpServers'] | undefined,
+  policy: PieceMcpServersConfig | undefined,
+): void {
+  if (!mcpServers) return;
+  for (const [serverName, serverConfig] of Object.entries(mcpServers)) {
+    if (!isPieceMcpTransportAllowed(serverConfig, policy)) {
+      const transport = serverConfig.type ?? 'stdio';
+      throw new Error(
+        `Movement "${movementName}" uses mcp_servers.${serverName} with disallowed transport "${transport}". ` +
+        'Configure piece_mcp_servers in project/global config to allow it.'
+      );
+    }
+  }
+}
+
 /** Convert raw YAML piece config to internal format. */
 export function normalizePieceConfig(
   raw: unknown,
@@ -386,6 +418,7 @@ export function normalizePieceConfig(
   context?: FacetResolutionContext,
   projectOverrides?: PieceOverrides,
   globalOverrides?: PieceOverrides,
+  pieceMcpServersPolicy?: PieceMcpServersConfig,
 ): PieceConfig {
   const parsed = PieceConfigRawSchema.parse(raw);
 
@@ -413,7 +446,18 @@ export function normalizePieceConfig(
   const pieceRuntime = normalizeRuntime(parsed.piece_config?.runtime);
 
   const movements: PieceMovement[] = parsed.movements.map((step) =>
-    normalizeStepFromRaw(step, pieceDir, sections, pieceProvider, pieceModel, pieceProviderOptions, context, projectOverrides, globalOverrides),
+    normalizeStepFromRaw(
+      step,
+      pieceDir,
+      sections,
+      pieceProvider,
+      pieceModel,
+      pieceProviderOptions,
+      context,
+      projectOverrides,
+      globalOverrides,
+      pieceMcpServersPolicy,
+    ),
   );
 
   // Schema guarantees movements.min(1)
@@ -463,6 +507,7 @@ export function loadPieceFromFile(filePath: string, projectDir: string): PieceCo
   const globalConfig = loadGlobalConfig();
   const projectOverrides = projectConfig.pieceOverrides;
   const globalOverrides = globalConfig.pieceOverrides;
+  const pieceMcpServersPolicy = projectConfig.pieceMcpServers ?? globalConfig.pieceMcpServers;
 
-  return normalizePieceConfig(raw, pieceDir, context, projectOverrides, globalOverrides);
+  return normalizePieceConfig(raw, pieceDir, context, projectOverrides, globalOverrides, pieceMcpServersPolicy);
 }

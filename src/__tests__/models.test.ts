@@ -348,7 +348,7 @@ describe('PieceConfigRawSchema', () => {
     expect(() => PieceConfigRawSchema.parse(config)).toThrow();
   });
 
-  it('should reject movement with stdio mcp_servers', () => {
+  it('should parse movement with stdio mcp_servers', () => {
     const config = {
       name: 'test-piece',
       movements: [
@@ -371,10 +371,16 @@ describe('PieceConfigRawSchema', () => {
       ],
     };
 
-    expect(() => PieceConfigRawSchema.parse(config)).toThrow();
+    const result = PieceConfigRawSchema.parse(config);
+    expect(result.movements![0]?.mcp_servers).toEqual({
+      playwright: {
+        command: 'npx',
+        args: ['-y', '@anthropic-ai/mcp-server-playwright'],
+      },
+    });
   });
 
-  it('should reject movement with sse mcp_servers', () => {
+  it('should parse movement with sse mcp_servers', () => {
     const config = {
       name: 'test-piece',
       movements: [
@@ -393,10 +399,17 @@ describe('PieceConfigRawSchema', () => {
       ],
     };
 
-    expect(() => PieceConfigRawSchema.parse(config)).toThrow();
+    const result = PieceConfigRawSchema.parse(config);
+    expect(result.movements![0]?.mcp_servers).toEqual({
+      remote: {
+        type: 'sse',
+        url: 'http://localhost:8080/sse',
+        headers: { Authorization: 'Bearer token' },
+      },
+    });
   });
 
-  it('should reject movement with http mcp_servers', () => {
+  it('should parse movement with http mcp_servers', () => {
     const config = {
       name: 'test-piece',
       movements: [
@@ -414,7 +427,13 @@ describe('PieceConfigRawSchema', () => {
       ],
     };
 
-    expect(() => PieceConfigRawSchema.parse(config)).toThrow();
+    const result = PieceConfigRawSchema.parse(config);
+    expect(result.movements![0]?.mcp_servers).toEqual({
+      api: {
+        type: 'http',
+        url: 'http://localhost:3000/mcp',
+      },
+    });
   });
 
   it('should allow omitting mcp_servers', () => {
@@ -467,6 +486,23 @@ describe('PieceConfigRawSchema', () => {
     };
 
     expect(() => PieceConfigRawSchema.parse(config)).toThrow();
+  });
+
+  it('should accept piece_mcp_servers config in project/global schemas', () => {
+    const project = ProjectConfigSchema.parse({
+      piece_mcp_servers: {
+        stdio: true,
+        sse: false,
+      },
+    });
+    const global = GlobalConfigSchema.parse({
+      piece_mcp_servers: {
+        http: false,
+      },
+    });
+
+    expect(project.piece_mcp_servers).toEqual({ stdio: true, sse: false });
+    expect(global.piece_mcp_servers).toEqual({ http: false });
   });
 
   it('should reject movement-level allowed_tools', () => {

@@ -588,6 +588,40 @@ movements:
     expect(() => loadPiece('with-mcp', testDir)).toThrow();
   });
 
+  it('should allow piece that defines remote mcp_servers by default', () => {
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'remote-mcp.yaml'), `
+name: remote-mcp
+max_movements: 5
+initial_movement: test
+
+movements:
+  - name: test
+    persona: coder
+    mcp_servers:
+      remote-api:
+        type: http
+        url: http://localhost:3000/mcp
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run tests"
+`);
+
+    const config = loadPiece('remote-mcp', testDir);
+
+    expect(config).not.toBeNull();
+    const testStep = config!.movements.find((s) => s.name === 'test');
+    expect(testStep?.mcpServers).toEqual({
+      'remote-api': {
+        type: 'http',
+        url: 'http://localhost:3000/mcp',
+      },
+    });
+  });
+
   it('should allow movement without mcp_servers', () => {
     const piecesDir = join(testDir, '.takt', 'pieces');
     mkdirSync(piecesDir, { recursive: true });
@@ -644,6 +678,47 @@ movements:
 `);
 
     expect(() => loadPiece('multi-mcp', testDir)).toThrow();
+  });
+
+  it('should allow stdio mcp_servers when explicitly enabled in project config', () => {
+    const configDir = join(testDir, '.takt');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.yaml'), [
+      'piece_mcp_servers:',
+      '  stdio: true',
+    ].join('\n'));
+
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'with-mcp.yaml'), `
+name: with-mcp
+max_movements: 5
+initial_movement: e2e-test
+
+movements:
+  - name: e2e-test
+    persona: coder
+    mcp_servers:
+      playwright:
+        command: npx
+        args: ["-y", "@anthropic-ai/mcp-server-playwright"]
+    rules:
+      - condition: Done
+        next: COMPLETE
+    instruction: "Run E2E tests"
+`);
+
+    const config = loadPiece('with-mcp', testDir);
+
+    expect(config).not.toBeNull();
+    const e2eStep = config!.movements.find((s) => s.name === 'e2e-test');
+    expect(e2eStep?.mcpServers).toEqual({
+      playwright: {
+        command: 'npx',
+        args: ['-y', '@anthropic-ai/mcp-server-playwright'],
+      },
+    });
   });
 });
 

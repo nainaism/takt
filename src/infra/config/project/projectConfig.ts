@@ -90,6 +90,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     interactive_preview_movements,
     piece_overrides,
     runtime,
+    piece_mcp_servers,
   } = parsedConfig;
   const normalizedProvider = normalizeConfigProviderReference(
     provider as RawProviderReference,
@@ -140,6 +141,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
       } | undefined
     ),
     runtime: normalizeRuntime(runtime),
+    pieceMcpServers: piece_mcp_servers as ProjectConfig['pieceMcpServers'],
   };
 }
 
@@ -242,6 +244,12 @@ export function saveProjectConfig(projectDir: string, config: ProjectConfig): vo
     savePayload.runtime = normalizedRuntime;
   } else {
     delete savePayload.runtime;
+  }
+
+  if (config.pieceMcpServers && Object.keys(config.pieceMcpServers).length > 0) {
+    savePayload.piece_mcp_servers = config.pieceMcpServers;
+  } else {
+    delete savePayload.piece_mcp_servers;
   }
 
   const content = stringify(savePayload, { indent: 2 });

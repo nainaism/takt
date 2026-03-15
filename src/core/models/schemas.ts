@@ -6,10 +6,11 @@
 
 import { z } from 'zod/v4';
 import { DEFAULT_LANGUAGE } from '../../shared/constants.js';
+import { McpServersSchema } from './mcp-schemas.js';
 import { INTERACTIVE_MODES } from './interactive-mode.js';
 import { STATUS_VALUES } from './status.js';
 
-export { McpServerConfigSchema, McpServersSchema } from './mcp-schemas.js';
+export { McpServerConfigSchema, McpServersSchema, PieceMcpServerConfigSchema, PieceMcpServersSchema } from './mcp-schemas.js';
 
 /** Agent model schema (opus, sonnet, haiku) */
 export const AgentModelSchema = z.enum(['opus', 'sonnet', 'haiku']).default('sonnet');
@@ -297,7 +298,7 @@ export const ParallelSubMovementRawSchema = z.object({
   /** Knowledge reference(s) — key name(s) from piece-level knowledge map */
   knowledge: z.union([z.string(), z.array(z.string())]).optional(),
   allowed_tools: z.never().optional(),
-  mcp_servers: z.never().optional(),
+  mcp_servers: McpServersSchema,
   provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
   /** Deprecated alias */
@@ -330,7 +331,7 @@ export const PieceMovementRawSchema = z.object({
   /** Knowledge reference(s) — key name(s) from piece-level knowledge map */
   knowledge: z.union([z.string(), z.array(z.string())]).optional(),
   allowed_tools: z.never().optional(),
-  mcp_servers: z.never().optional(),
+  mcp_servers: McpServersSchema,
   provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
   /** Deprecated alias */
@@ -480,6 +481,13 @@ export const PipelineConfigSchema = z.object({
   pr_body_template: z.string().optional(),
 }).strict();
 
+/** Piece-level MCP transport policy schema */
+export const PieceMcpServersConfigSchema = z.object({
+  stdio: z.boolean().optional(),
+  sse: z.boolean().optional(),
+  http: z.boolean().optional(),
+}).strict().optional();
+
 /** Piece category config schema (recursive) */
 export type PieceCategoryConfigNode = {
   pieces?: string[];
@@ -515,6 +523,8 @@ export const ProjectConfigSchema = z.object({
   provider_profiles: ProviderPermissionProfilesSchema,
   /** Project-level runtime environment configuration */
   runtime: RuntimeConfigSchema,
+  /** Piece-level MCP transport policy */
+  piece_mcp_servers: PieceMcpServersConfigSchema,
   /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
   concurrency: z.number().int().min(1).max(10).optional(),
   /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
