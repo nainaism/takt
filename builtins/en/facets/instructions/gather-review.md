@@ -17,14 +17,17 @@ Analyze the task text and determine which mode to use.
    - Collect Issue title, description, labels, and comments
 
 ### Mode 2: Branch mode
-**Trigger:** Task text matches a branch name found in `git branch -a`. This includes names with `/` (e.g., `feature/auth`) as well as simple names (e.g., `develop`, `release-v2`, `hotfix-login`). When unsure, verify with `git branch -a | grep {text}`.
+**Trigger:** Task text matches a branch name found in `git branch -a`. This includes names with `/` (e.g., `feature/auth`) as well as simple names (e.g., `develop`, `release-v2`, `hotfix-login`).
+
+**Security rule (required):** Never interpolate raw task text into shell commands. Treat task text as untrusted input and first resolve it to an exact branch name from `git branch -a`. If no exact match exists, do not run branch-specific shell commands with that text.
 **Steps:**
 1. Determine the base branch (default: `main`, fallback: `master`)
-2. Run `git log {base}..{branch} --oneline` to get commit history
-3. Run `git diff {base}...{branch}` to get the diff
-4. Compile the changed files list
-5. Extract purpose from commit messages
-6. If a PR exists for the branch, fetch it with `gh pr list --head {branch}`
+2. List branch names via `git branch -a`, then select a branch only when the task text exactly matches one listed name (or an unambiguous normalized equivalent such as without `remotes/origin/` prefix)
+3. Run `git log {base}..{branch} --oneline` to get commit history (only after step 2 resolves `{branch}`)
+4. Run `git diff {base}...{branch}` to get the diff (only after step 2 resolves `{branch}`)
+5. Compile the changed files list
+6. Extract purpose from commit messages
+7. If a PR exists for the branch, fetch it with `gh pr list --head {branch}` (only after step 2 resolves `{branch}`)
 
 ### Mode 3: Current diff mode
 **Trigger:** Task does not match Mode 1 or Mode 2 (e.g., "review current changes", "last 3 commits", "current diff")
