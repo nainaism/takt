@@ -6,6 +6,28 @@
 
 フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) に基づいています。
 
+## [0.32.2] - 2026-03-17
+
+### Added
+
+- 到達経路（Reachability）ファセットを追加: 新しい画面・機能を追加する際に、ルーティング・メニュー・ボタン等のエントリーポイントを同時に整備することを計画・実装・レビューの各段階で検証
+- 再取得ループ防止ファセットを追加: `useEffect` の依存配列に不安定な Context/Provider 関数参照を含めることで起きる無限ループを検出・防止するナレッジとポリシー
+- UIライブラリ統合ファセットを追加: サードパーティ UI コンポーネント（データグリッド、日付ピッカー等）導入時のバージョン互換性・実マウント検証のナレッジとポリシー
+- React ナレッジファセット (`react.md`) を新規追加: Effects の再実行制御、Context/Provider の値安定性に関する判断基準テーブル付き
+- デザイン計画ポリシー (`design-planning.md`) を新規追加: デザインリファレンスが存在する場合の要素インベントリ・スコープ決定の基準
+- フロントエンド専用プランフォーマット (`plan-frontend.md`) を新規追加: デザイン要素の Keep/Change 判定テーブルを含むプラン出力契約
+
+### Changed
+
+- フロントエンド系ピース（`frontend`, `frontend-mini`, `dual`, `dual-mini`, `dual-cqrs`, `dual-cqrs-mini`）の plan ムーブメントに `design-planning` ポリシーと `react` ナレッジを統合
+- フロントエンド系ピースのプランフォーマットを `plan` から `plan-frontend` に変更
+- `frontend` ピースの全ムーブメント（テスト、レビュー、修正等）に `react` ナレッジを追加
+
+### Internal
+
+- `@openai/codex-sdk` を 0.112.0 → 0.114.0 に更新
+- team leader worker pool の E2E テストを安定化
+
 ## [0.32.1] - 2026-03-14
 
 ### Fixed
