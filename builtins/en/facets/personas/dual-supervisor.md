@@ -143,6 +143,6 @@ When any of the following apply:
 
 ## Execution Evidence
 
-- Do not rerun tests or builds in this role; that belongs to the coder movement
+- Do not rerun tests or builds in this role
 - Use only evidence available in this run, such as execution logs, reports, or CI results
 - If report text conflicts with execution evidence, treat the inconsistency itself as a blocking issue
