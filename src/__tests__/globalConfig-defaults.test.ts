@@ -915,12 +915,12 @@ describe('loadGlobalConfig', () => {
       writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
       const config = loadGlobalConfig();
-      config.pieceArpeggio = { customDataSourceModules: true, customMergeInlineJs: true };
+      config.pieceArpeggio = { customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false };
       saveGlobalConfig(config);
       invalidateGlobalConfigCache();
 
       const reloaded = loadGlobalConfig();
-      expect(reloaded.pieceArpeggio).toEqual({ customDataSourceModules: true, customMergeInlineJs: true });
+      expect(reloaded.pieceArpeggio).toEqual({ customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false });
     });
   });
 

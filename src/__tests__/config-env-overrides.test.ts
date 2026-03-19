@@ -133,6 +133,17 @@ describe('config env overrides', () => {
     });
   });
 
+  it('should apply TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_FILES override for global config', () => {
+    process.env.TAKT_PIECE_ARPEGGIO_CUSTOM_MERGE_FILES = 'true';
+
+    const raw: Record<string, unknown> = {};
+    applyGlobalConfigEnvOverrides(raw);
+
+    expect(raw.piece_arpeggio).toEqual({
+      custom_merge_files: true,
+    });
+  });
+
   it('should apply TAKT_PIECE_ARPEGGIO_CUSTOM_DATA_SOURCE_MODULES override for project config', () => {
     process.env.TAKT_PIECE_ARPEGGIO_CUSTOM_DATA_SOURCE_MODULES = 'false';
 
