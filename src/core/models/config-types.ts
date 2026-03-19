@@ -115,6 +115,13 @@ export interface PieceArpeggioConfig {
   customMergeFiles?: boolean;
 }
 
+/** Sync conflict resolver configuration */
+export interface SyncConflictResolverConfig {
+  /** Auto-approve conflict resolver tool requests (default: false) */
+  autoApproveTools?: boolean;
+}
+
+
 /** Notification sound toggles per event timing */
 export interface NotificationSoundEventsConfig {
   /** Warning when iteration limit is reached */
@@ -183,6 +190,8 @@ export interface ProjectConfig {
   pieceRuntimePrepare?: PieceRuntimePrepareConfig;
   /** Piece-level Arpeggio policy */
   pieceArpeggio?: PieceArpeggioConfig;
+  /** Sync conflict resolver behavior */
+  syncConflictResolver?: SyncConflictResolverConfig;
 }
 
 /**

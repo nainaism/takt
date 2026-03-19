@@ -1,4 +1,4 @@
-import type { AnalyticsConfig, PieceArpeggioConfig, PieceRuntimePrepareConfig, SubmoduleSelection } from '../../../core/models/config-types.js';
+import type { AnalyticsConfig, PieceArpeggioConfig, PieceRuntimePrepareConfig, SubmoduleSelection, SyncConflictResolverConfig } from '../../../core/models/config-types.js';
 
 const SUBMODULES_ALL = 'all';
 
@@ -106,4 +106,17 @@ export function denormalizePieceArpeggioPolicy(
     custom_merge_inline_js: config.customMergeInlineJs,
     custom_merge_files: config.customMergeFiles,
   };
+}
+
+export function normalizeSyncConflictResolver(
+  raw: { auto_approve_tools?: boolean } | undefined,
+): SyncConflictResolverConfig | undefined {
+  return raw ? { autoApproveTools: raw.auto_approve_tools } : undefined;
+}
+
+export function denormalizeSyncConflictResolver(
+  config: SyncConflictResolverConfig | undefined,
+): Record<string, unknown> | undefined {
+  if (!config) return undefined;
+  return { auto_approve_tools: config.autoApproveTools };
 }

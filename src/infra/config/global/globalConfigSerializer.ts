@@ -131,6 +131,11 @@ export function serializeGlobalConfig(config: GlobalConfig): Record<string, unkn
       custom_merge_files: config.pieceArpeggio.customMergeFiles,
     };
   }
+  if (config.syncConflictResolver) {
+    raw.sync_conflict_resolver = {
+      auto_approve_tools: config.syncConflictResolver.autoApproveTools,
+    };
+  }
   if (config.preventSleep !== undefined) {
     raw.prevent_sleep = config.preventSleep;
   }

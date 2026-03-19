@@ -794,4 +794,16 @@ describe('ProjectConfigSchema', () => {
       },
     });
   });
+
+  it('should parse sync_conflict_resolver config block', () => {
+    const result = ProjectConfigSchema.parse({
+      sync_conflict_resolver: {
+        auto_approve_tools: true,
+      },
+    } as unknown) as Record<string, unknown>;
+
+    expect(result.sync_conflict_resolver).toEqual({
+      auto_approve_tools: true,
+    });
+  });
 });

@@ -507,6 +507,11 @@ export const PieceArpeggioConfigSchema = z.object({
   custom_merge_files: z.boolean().optional(),
 }).strict();
 
+export const SyncConflictResolverConfigSchema = z.object({
+  auto_approve_tools: z.boolean().optional(),
+}).strict();
+
+
 /** Piece category config schema (recursive) */
 export type PieceCategoryConfigNode = {
   pieces?: string[];
@@ -547,6 +552,8 @@ export const ProjectConfigSchema = z.object({
   piece_runtime_prepare: PieceRuntimePrepareConfigSchema.optional(),
   /** Piece-level Arpeggio policy */
   piece_arpeggio: PieceArpeggioConfigSchema.optional(),
+  /** Sync conflict resolver behavior */
+  sync_conflict_resolver: SyncConflictResolverConfigSchema.optional(),
   /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
   concurrency: z.number().int().min(1).max(10).optional(),
   /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */

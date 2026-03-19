@@ -33,6 +33,8 @@ import {
   denormalizePieceRuntimePreparePolicy,
   normalizePieceArpeggioPolicy,
   denormalizePieceArpeggioPolicy,
+  normalizeSyncConflictResolver,
+  denormalizeSyncConflictResolver,
 } from './projectConfigTransforms.js';
 
 export type { ProjectConfig as ProjectLocalConfig } from '../types.js';
@@ -100,6 +102,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     runtime,
     piece_runtime_prepare,
     piece_arpeggio,
+    sync_conflict_resolver,
   } = parsedConfig;
   const normalizedProvider = normalizeConfigProviderReference(
     provider as RawProviderReference,
@@ -163,6 +166,7 @@ export function loadProjectConfig(projectDir: string): ProjectConfig {
     runtime: normalizeRuntime(runtime),
     pieceRuntimePrepare: normalizePieceRuntimePreparePolicy(piece_runtime_prepare),
     pieceArpeggio: normalizePieceArpeggioPolicy(piece_arpeggio),
+    syncConflictResolver: normalizeSyncConflictResolver(sync_conflict_resolver),
   };
 }
 
@@ -199,33 +203,22 @@ export function saveProjectConfig(projectDir: string, config: ProjectConfig): vo
   } else {
     delete savePayload.provider_options;
   }
-  delete savePayload.providerProfiles;
-  delete savePayload.providerOptions;
-
-  if (config.autoPr !== undefined) savePayload.auto_pr = config.autoPr;
-  if (config.draftPr !== undefined) savePayload.draft_pr = config.draftPr;
-  if (config.allowGitHooks !== undefined) savePayload.allow_git_hooks = config.allowGitHooks;
-  if (config.allowGitFilters !== undefined) savePayload.allow_git_filters = config.allowGitFilters;
-  if (config.vcsProvider !== undefined) savePayload.vcs_provider = config.vcsProvider;
-  if (config.baseBranch !== undefined) savePayload.base_branch = config.baseBranch;
-  if (config.branchNameStrategy !== undefined) savePayload.branch_name_strategy = config.branchNameStrategy;
-  if (config.minimalOutput !== undefined) savePayload.minimal_output = config.minimalOutput;
-  if (config.taskPollIntervalMs !== undefined) savePayload.task_poll_interval_ms = config.taskPollIntervalMs;
-  if (config.interactivePreviewMovements !== undefined) savePayload.interactive_preview_movements = config.interactivePreviewMovements;
-  if (config.concurrency !== undefined) savePayload.concurrency = config.concurrency;
+  for (const [camel, snake] of [
+    ['autoPr', 'auto_pr'], ['draftPr', 'draft_pr'], ['allowGitHooks', 'allow_git_hooks'],
+    ['allowGitFilters', 'allow_git_filters'], ['vcsProvider', 'vcs_provider'],
+    ['baseBranch', 'base_branch'], ['branchNameStrategy', 'branch_name_strategy'],
+    ['minimalOutput', 'minimal_output'], ['taskPollIntervalMs', 'task_poll_interval_ms'],
+    ['interactivePreviewMovements', 'interactive_preview_movements'], ['concurrency', 'concurrency'],
+  ] as const) {
+    if (config[camel] !== undefined) savePayload[snake] = config[camel];
+  }
   delete savePayload.pipeline;
   if (config.pipeline) {
-    const pipelineRaw: Record<string, unknown> = {};
-    if (config.pipeline.defaultBranchPrefix !== undefined) {
-      pipelineRaw.default_branch_prefix = config.pipeline.defaultBranchPrefix;
-    }
-    if (config.pipeline.commitMessageTemplate !== undefined) {
-      pipelineRaw.commit_message_template = config.pipeline.commitMessageTemplate;
-    }
-    if (config.pipeline.prBodyTemplate !== undefined) {
-      pipelineRaw.pr_body_template = config.pipeline.prBodyTemplate;
-    }
-    if (Object.keys(pipelineRaw).length > 0) savePayload.pipeline = pipelineRaw;
+    const pr: Record<string, unknown> = {};
+    if (config.pipeline.defaultBranchPrefix !== undefined) pr.default_branch_prefix = config.pipeline.defaultBranchPrefix;
+    if (config.pipeline.commitMessageTemplate !== undefined) pr.commit_message_template = config.pipeline.commitMessageTemplate;
+    if (config.pipeline.prBodyTemplate !== undefined) pr.pr_body_template = config.pipeline.prBodyTemplate;
+    if (Object.keys(pr).length > 0) savePayload.pipeline = pr;
   }
   if (config.personaProviders && Object.keys(config.personaProviders).length > 0) {
     savePayload.persona_providers = config.personaProviders;
@@ -250,10 +243,11 @@ export function saveProjectConfig(projectDir: string, config: ProjectConfig): vo
     }
   }
   for (const k of [
-    'autoPr', 'draftPr', 'allowGitHooks', 'allowGitFilters', 'vcsProvider',
-    'baseBranch', 'withSubmodules', 'branchNameStrategy', 'minimalOutput',
-    'taskPollIntervalMs', 'interactivePreviewMovements', 'personaProviders',
-    'taktProviders', 'pieceRuntimePrepare', 'pieceArpeggio',
+    'providerProfiles', 'providerOptions', 'autoPr', 'draftPr', 'allowGitHooks',
+    'allowGitFilters', 'vcsProvider', 'baseBranch', 'withSubmodules',
+    'branchNameStrategy', 'minimalOutput', 'taskPollIntervalMs',
+    'interactivePreviewMovements', 'personaProviders', 'taktProviders',
+    'pieceRuntimePrepare', 'pieceArpeggio', 'syncConflictResolver',
   ] as const) {
     delete savePayload[k];
   }
@@ -281,6 +275,12 @@ export function saveProjectConfig(projectDir: string, config: ProjectConfig): vo
     savePayload.piece_arpeggio = rawArpeggio;
   } else {
     delete savePayload.piece_arpeggio;
+  }
+  const rawSyncResolver = denormalizeSyncConflictResolver(config.syncConflictResolver);
+  if (rawSyncResolver) {
+    savePayload.sync_conflict_resolver = rawSyncResolver;
+  } else {
+    delete savePayload.sync_conflict_resolver;
   }
 
   const content = stringify(savePayload, { indent: 2 });

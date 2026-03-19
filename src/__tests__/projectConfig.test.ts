@@ -669,6 +669,32 @@ piece_overrides:
     });
   });
 
+  describe('sync_conflict_resolver round-trip', () => {
+    it('should load sync_conflict_resolver config block', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        ['sync_conflict_resolver:', '  auto_approve_tools: true'].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.syncConflictResolver).toEqual({ autoApproveTools: true });
+    });
+
+    it('should round-trip sync_conflict_resolver config block', () => {
+      const config: ProjectLocalConfig = {
+        syncConflictResolver: { autoApproveTools: true },
+      };
+
+      saveProjectConfig(testDir, config);
+      const reloaded = loadProjectConfig(testDir);
+
+      expect(reloaded.syncConflictResolver).toEqual({ autoApproveTools: true });
+    });
+  });
+
   describe('tilde expansion for analytics path', () => {
     it('should expand "~/" in analytics.events_path on load', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');

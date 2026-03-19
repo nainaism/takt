@@ -134,6 +134,9 @@ export class GlobalConfigManager {
         customMergeInlineJs: parsed.piece_arpeggio.custom_merge_inline_js,
         customMergeFiles: parsed.piece_arpeggio.custom_merge_files,
       } : undefined,
+      syncConflictResolver: parsed.sync_conflict_resolver ? {
+        autoApproveTools: parsed.sync_conflict_resolver.auto_approve_tools,
+      } : undefined,
       preventSleep: parsed.prevent_sleep,
       notificationSound: parsed.notification_sound,
       notificationSoundEvents: parsed.notification_sound_events ? {
