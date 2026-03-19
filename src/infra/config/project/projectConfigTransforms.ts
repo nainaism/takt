@@ -1,4 +1,4 @@
-import type { AnalyticsConfig, SubmoduleSelection } from '../../../core/models/config-types.js';
+import type { AnalyticsConfig, PieceArpeggioConfig, PieceRuntimePrepareConfig, SubmoduleSelection } from '../../../core/models/config-types.js';
 
 const SUBMODULES_ALL = 'all';
 
@@ -72,4 +72,38 @@ export function denormalizeAnalytics(config: AnalyticsConfig | undefined): Recor
 export function formatIssuePath(path: readonly PropertyKey[]): string {
   if (path.length === 0) return '(root)';
   return path.map((segment) => String(segment)).join('.');
+}
+
+export function normalizePieceRuntimePreparePolicy(
+  raw: { custom_scripts?: boolean } | undefined,
+): PieceRuntimePrepareConfig | undefined {
+  return raw ? { customScripts: raw.custom_scripts } : undefined;
+}
+
+export function denormalizePieceRuntimePreparePolicy(
+  config: PieceRuntimePrepareConfig | undefined,
+): Record<string, unknown> | undefined {
+  if (!config) return undefined;
+  return { custom_scripts: config.customScripts };
+}
+
+export function normalizePieceArpeggioPolicy(
+  raw: { custom_data_source_modules?: boolean; custom_merge_inline_js?: boolean; custom_merge_files?: boolean } | undefined,
+): PieceArpeggioConfig | undefined {
+  return raw ? {
+    customDataSourceModules: raw.custom_data_source_modules,
+    customMergeInlineJs: raw.custom_merge_inline_js,
+    customMergeFiles: raw.custom_merge_files,
+  } : undefined;
+}
+
+export function denormalizePieceArpeggioPolicy(
+  config: PieceArpeggioConfig | undefined,
+): Record<string, unknown> | undefined {
+  if (!config) return undefined;
+  return {
+    custom_data_source_modules: config.customDataSourceModules,
+    custom_merge_inline_js: config.customMergeInlineJs,
+    custom_merge_files: config.customMergeFiles,
+  };
 }
