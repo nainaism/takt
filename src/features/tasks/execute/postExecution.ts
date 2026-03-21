@@ -69,7 +69,7 @@ export async function postExecutionFlow(options: PostExecutionOptions): Promise<
 
   if (commitResult.commitHash && branch && shouldCreatePr) {
     try {
-      pushHeadToOriginBranch(execCwd, branch);
+      pushHeadToOriginBranch(projectCwd, branch);
     } catch (pushError) {
       void pushError;
       log.error('Branch push from execution cwd failed', {

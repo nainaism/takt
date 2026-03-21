@@ -171,7 +171,7 @@ describe('postExecutionFlow', () => {
     const result = await postExecutionFlow(baseOptions);
 
     // Then: the workflow should continue into the existing pr_failed path.
-    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/clone', 'task/fix-the-bug');
+    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
       '/project',
       expect.objectContaining({
@@ -192,7 +192,7 @@ describe('postExecutionFlow', () => {
 
     const result = await postExecutionFlow(baseOptions);
 
-    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/clone', 'task/fix-the-bug');
+    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
     expect(result.prFailed).toBe(true);
