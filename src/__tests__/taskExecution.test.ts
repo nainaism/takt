@@ -5,9 +5,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { TaskInfo } from '../infra/task/index.js';
 
-const { mockResolveTaskExecution, mockExecutePiece, mockLoadPieceByIdentifier, mockIsPiecePath, mockResolvePieceConfigValues, mockResolveProviderOptionsWithTrace, mockBuildBooleanTaskResult, mockBuildTaskResult, mockPersistTaskResult, mockPersistPrFailedTaskResult, mockPersistTaskError, mockPostExecutionFlow } =
+const { mockResolveTaskExecution, mockResolveTaskIssue, mockExecutePiece, mockLoadPieceByIdentifier, mockIsPiecePath, mockResolvePieceConfigValues, mockResolveProviderOptionsWithTrace, mockBuildBooleanTaskResult, mockBuildTaskResult, mockPersistTaskResult, mockPersistPrFailedTaskResult, mockPersistTaskError, mockPostExecutionFlow } =
   vi.hoisted(() => ({
     mockResolveTaskExecution: vi.fn(),
+    mockResolveTaskIssue: vi.fn(),
     mockExecutePiece: vi.fn(),
     mockLoadPieceByIdentifier: vi.fn(),
     mockIsPiecePath: vi.fn(() => false),
@@ -23,7 +24,7 @@ const { mockResolveTaskExecution, mockExecutePiece, mockLoadPieceByIdentifier, m
 
 vi.mock('../features/tasks/execute/resolveTask.js', () => ({
   resolveTaskExecution: (...args: unknown[]) => mockResolveTaskExecution(...args),
-  resolveTaskIssue: vi.fn(),
+  resolveTaskIssue: (...args: unknown[]) => mockResolveTaskIssue(...args),
 }));
 
 vi.mock('../features/tasks/execute/pieceExecution.js', () => ({
@@ -142,6 +143,7 @@ describe('executeAndCompleteTask', () => {
       issueNumber: undefined,
     });
     mockExecutePiece.mockResolvedValue({ success: true });
+    mockResolveTaskIssue.mockReturnValue(undefined);
   });
 
   it('should pass taskDisplayLabel from parallel options into executePiece', async () => {
@@ -347,6 +349,41 @@ describe('executeAndCompleteTask', () => {
       expect.objectContaining({
         runResult: expect.objectContaining({ success: true }),
         prUrl: 'https://github.com/org/repo/pull/1',
+      }),
+    );
+  });
+
+  it('should resolve PR issue metadata using project cwd in worktree mode', async () => {
+    const task = createTask('task-with-issue-pr');
+    const issue = { number: 18, title: 'Issue', body: 'Body', labels: [], comments: [] };
+
+    mockResolveTaskExecution.mockResolvedValue({
+      execCwd: '/worktree/clone',
+      execPiece: 'default',
+      isWorktree: true,
+      autoPr: true,
+      draftPr: false,
+      taskPrompt: undefined,
+      reportDirName: undefined,
+      branch: 'takt/18/task-with-issue-pr',
+      worktreePath: '/worktree/clone',
+      baseBranch: 'main',
+      startMovement: undefined,
+      retryNote: undefined,
+      issueNumber: 18,
+    });
+    mockResolveTaskIssue.mockReturnValue([issue]);
+    mockPostExecutionFlow.mockResolvedValue({ prUrl: 'https://github.com/org/repo/pull/18' });
+
+    const result = await executeAndCompleteTaskWithoutPiece(task, {} as never, '/project');
+
+    expect(result).toBe(true);
+    expect(mockResolveTaskIssue).toHaveBeenCalledWith(18, '/project');
+    expect(mockPostExecutionFlow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        execCwd: '/worktree/clone',
+        projectCwd: '/project',
+        issues: [issue],
       }),
     );
   });

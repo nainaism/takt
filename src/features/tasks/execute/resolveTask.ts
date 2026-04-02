@@ -83,20 +83,20 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-export function resolveTaskIssue(issueNumber: number | undefined, cwd: string): Issue[] | undefined {
+export function resolveTaskIssue(issueNumber: number | undefined, projectCwd: string): Issue[] | undefined {
   if (issueNumber === undefined) {
     return undefined;
   }
 
   const gitProvider = getGitProvider();
-  const cliStatus = gitProvider.checkCliStatus(cwd);
+  const cliStatus = gitProvider.checkCliStatus(projectCwd);
   if (!cliStatus.available) {
     log.info('VCS CLI unavailable, skipping issue resolution for PR body', { issueNumber });
     return undefined;
   }
 
   try {
-    const issue = gitProvider.fetchIssue(issueNumber, cwd);
+    const issue = gitProvider.fetchIssue(issueNumber, projectCwd);
     return [issue];
   } catch (e) {
     log.info('Failed to fetch issue for PR body, continuing without issue info', { issueNumber, error: getErrorMessage(e) });

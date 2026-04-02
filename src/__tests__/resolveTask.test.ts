@@ -495,7 +495,7 @@ describe('resolveTaskIssue', () => {
     expect(result).toBeUndefined();
   });
 
-  it('CLI が利用不可の場合は undefined を返し、cwd を checkCliStatus に渡す', () => {
+  it('CLI が利用不可の場合は undefined を返し、projectCwd を checkCliStatus に渡す', () => {
     // Given
     const mockProvider = {
       checkCliStatus: vi.fn().mockReturnValue({ available: false, error: 'not installed' }),
