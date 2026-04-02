@@ -53,10 +53,8 @@ export class OptionsBuilder {
       cwd: this.getCwd(),
       abortSignal: this.engineOptions.abortSignal,
       personaPath: step.personaPath,
-      provider: this.engineOptions.provider,
-      model: this.engineOptions.model,
-      stepProvider: resolvedProvider,
-      stepModel: resolvedModel,
+      resolvedProvider,
+      resolvedModel,
       permissionResolution: {
         movementName: step.name,
         requiredPermissionMode: step.requiredPermissionMode,

@@ -248,7 +248,7 @@ describe('OptionsBuilder.resolveStepProviderModel', () => {
     expect(result.provider).toBeUndefined();
   });
 
-  it('should match buildBaseOptions stepProvider and stepModel', () => {
+  it('should match buildBaseOptions resolvedProvider and resolvedModel', () => {
     const step = createMovement({ personaDisplayName: 'coder' });
     const builder = createBuilder(step, {
       provider: 'claude',
@@ -259,8 +259,8 @@ describe('OptionsBuilder.resolveStepProviderModel', () => {
     const providerInfo = builder.resolveStepProviderModel(step);
     const baseOptions = builder.buildBaseOptions(step);
 
-    expect(providerInfo.provider).toBe(baseOptions.stepProvider);
-    expect(providerInfo.model).toBe(baseOptions.stepModel);
+    expect(providerInfo.provider).toBe(baseOptions.resolvedProvider);
+    expect(providerInfo.model).toBe(baseOptions.resolvedModel);
   });
 });
 

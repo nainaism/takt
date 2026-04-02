@@ -141,8 +141,8 @@ describe('IT: provider block reflection', () => {
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBe('codex');
-    expect(options?.stepModel).toBe('gpt-5.3');
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('gpt-5.3');
     expect(options?.providerOptions).toEqual({
       codex: { networkAccess: false },
     });
@@ -183,8 +183,8 @@ describe('IT: provider block reflection', () => {
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBe('codex');
-    expect(options?.stepModel).toBe('piece-model');
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('piece-model');
     expect(options?.providerOptions).toEqual({
       codex: { networkAccess: true },
     });
@@ -226,8 +226,8 @@ describe('IT: provider block reflection', () => {
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBe('codex');
-    expect(options?.stepModel).toBe('project-model');
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('project-model');
     expect(options?.providerOptions).toEqual({
       codex: { networkAccess: false },
     });

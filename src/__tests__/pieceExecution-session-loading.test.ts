@@ -401,6 +401,25 @@ describe('executePiece session loading', () => {
     expect(mockInfo).toHaveBeenCalledWith('Model: gpt-4.1');
   });
 
+  it('should pass resolved global provider/model to PieceEngine for movement-level resolution', async () => {
+    vi.mocked(resolvePieceConfigValues).mockReturnValue({
+      ...defaultResolvedConfigValues,
+      provider: 'claude',
+      model: 'gpt-5.4',
+    });
+
+    await executePiece(makeConfig(), 'task', '/tmp/project', {
+      projectCwd: '/tmp/project',
+      personaProviders: { coder: { provider: 'codex', model: 'o3' } },
+    });
+
+    expect(MockPieceEngine.lastInstance.receivedOptions.provider).toBe('claude');
+    expect(MockPieceEngine.lastInstance.receivedOptions.model).toBe('gpt-5.4');
+    expect(MockPieceEngine.lastInstance.receivedOptions.personaProviders).toEqual({
+      coder: { provider: 'codex', model: 'o3' },
+    });
+  });
+
   it('should log provider and model per movement with overrides', async () => {
     await executePiece(makeConfig(), 'task', '/tmp/project', {
       projectCwd: '/tmp/project',
