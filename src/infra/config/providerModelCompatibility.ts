@@ -1,1 +1,1 @@
-export { validateProviderModelCompatibility } from '../../core/piece/provider-model-compatibility.js';
+export { validateProviderModelCompatibility } from '../../core/workflow/provider-model-compatibility.js';

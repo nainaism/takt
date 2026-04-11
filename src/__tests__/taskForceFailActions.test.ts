@@ -115,7 +115,7 @@ describe('forceFailRunningTask', () => {
     expect(mockConfirm).toHaveBeenCalledWith('Mark running task "running-task" as failed?', false);
     expect(mockRunnerProjectDir).toHaveBeenCalledWith(projectDir);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
     expect(mockSuccess).toHaveBeenCalled();
@@ -153,7 +153,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'review',
+      step: 'review',
       error: 'Manually marked as failed',
     });
   });
@@ -178,7 +178,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'review',
+      step: 'review',
       error: 'Manually marked as failed',
     });
   });
@@ -201,7 +201,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
   });
@@ -220,7 +220,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
@@ -236,7 +236,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: undefined,
+      step: undefined,
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'review',
+      step: 'review',
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
@@ -286,7 +286,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
@@ -315,7 +315,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'review',
+      step: 'review',
       error: 'Manually marked as failed',
     });
   });
@@ -335,13 +335,13 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'review',
+      step: 'review',
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
   });
 
-  it('should allow force-fail with undefined movement when only unrelated corrupt meta.json exists', async () => {
+  it('should allow force-fail with undefined step when only unrelated corrupt meta.json exists', async () => {
     mockConfirm.mockResolvedValue(true);
     fs.mkdirSync(path.join(projectDir, '.takt', 'runs', '20260409-run-z'), { recursive: true });
     fs.writeFileSync(path.join(projectDir, '.takt', 'runs', '20260409-run-z', 'meta.json'), '{ broken json', 'utf-8');
@@ -350,13 +350,13 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: undefined,
+      step: undefined,
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
   });
 
-  it('should allow force-fail with undefined movement when run slug is missing', async () => {
+  it('should allow force-fail with undefined step when run slug is missing', async () => {
     mockConfirm.mockResolvedValue(true);
     writeMeta(projectDir, '20260409-run-a', {
       task: 'Force fail me\nwith full prompt',
@@ -371,7 +371,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: undefined,
+      step: undefined,
       error: 'Manually marked as failed',
     });
   });
@@ -391,7 +391,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
     expect(mockLogError).not.toHaveBeenCalled();
@@ -412,12 +412,12 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: 'implement',
+      step: 'implement',
       error: 'Manually marked as failed',
     });
   });
 
-  it('should ignore invalid run slug values and continue with undefined movement', async () => {
+  it('should ignore invalid run slug values and continue with undefined step', async () => {
     mockConfirm.mockResolvedValue(true);
 
     const result = await forceFailRunningTask(
@@ -427,7 +427,7 @@ describe('forceFailRunningTask', () => {
 
     expect(result).toBe(true);
     expect(mockForceFailRunningTask).toHaveBeenCalledWith('running-task', {
-      movement: undefined,
+      step: undefined,
       error: 'Manually marked as failed',
     });
   });

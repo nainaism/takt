@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { findRunningStepByRunSlug } from '../../../core/piece/run/run-meta.js';
+import { findRunningStepByRunSlug } from '../../../core/workflow/run/run-meta.js';
 import type { TaskListItem } from '../../../infra/task/index.js';
 import { resolveCloneBaseDir } from '../../../infra/task/clone.js';
 import { TaskRunner, isStaleRunningTask } from '../../../infra/task/index.js';
@@ -62,10 +62,10 @@ export async function forceFailRunningTask(
   }
 
   try {
-    const movement = resolveCurrentStep(projectDir, task);
+    const step = resolveCurrentStep(projectDir, task);
     const runner = new TaskRunner(projectDir);
     runner.forceFailRunningTask(task.name, {
-      movement,
+      step,
       error: FORCE_FAIL_ERROR,
     });
   } catch (err) {

@@ -7,7 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readRunMetaBySlug } from '../../core/piece/run/run-meta.js';
+import { readRunMetaBySlug } from '../../core/workflow/run/run-meta.js';
 import {
   PROVIDER_EVENTS_LOG_FILE_SUFFIX,
   USAGE_EVENTS_LOG_FILE_SUFFIX,
@@ -18,20 +18,20 @@ import type { SessionLog } from '../../shared/utils/index.js';
 /** Maximum number of runs to return from listing */
 const MAX_RUNS = 10;
 
-/** Maximum character length for movement log content */
+/** Maximum character length for step log content */
 const MAX_CONTENT_LENGTH = 500;
 
 /** Summary of a run for selection UI */
 export interface RunSummary {
   readonly slug: string;
   readonly task: string;
-  readonly piece: string;
+  readonly workflow: string;
   readonly status: string;
   readonly startTime: string;
 }
 
-/** A single movement log entry for display */
-interface MovementLogEntry {
+/** A single step log entry for display */
+interface StepLogEntry {
   readonly step: string;
   readonly persona: string;
   readonly status: string;
@@ -47,9 +47,9 @@ interface ReportEntry {
 /** Full context loaded from a run for prompt injection */
 export interface RunSessionContext {
   readonly task: string;
-  readonly piece: string;
+  readonly workflow: string;
   readonly status: string;
-  readonly movementLogs: readonly MovementLogEntry[];
+  readonly stepLogs: readonly StepLogEntry[];
   readonly reports: readonly ReportEntry[];
 }
 
@@ -66,7 +66,7 @@ function truncateContent(content: string, maxLength: number): string {
   return content.slice(0, maxLength) + '…';
 }
 
-function buildMovementLogs(sessionLog: SessionLog): MovementLogEntry[] {
+function buildStepLogs(sessionLog: SessionLog): StepLogEntry[] {
   return sessionLog.history.map((entry) => ({
     step: entry.step,
     persona: entry.persona,
@@ -129,7 +129,7 @@ export function listRecentRuns(cwd: string): RunSummary[] {
     summaries.push({
       slug: entry.name,
       task: meta.task,
-      piece: meta.piece,
+      workflow: meta.workflow,
       status: meta.status,
       startTime: meta.startTime,
     });
@@ -177,11 +177,11 @@ export function loadRunSessionContext(cwd: string, slug: string): RunSessionCont
   const logsDir = join(cwd, meta.logsDirectory);
   const logFile = findSessionLogFile(logsDir);
 
-  let movementLogs: MovementLogEntry[] = [];
+  let stepLogs: StepLogEntry[] = [];
   if (logFile) {
     const sessionLog = loadNdjsonLog(logFile);
     if (sessionLog) {
-      movementLogs = buildMovementLogs(sessionLog);
+      stepLogs = buildStepLogs(sessionLog);
     }
   }
 
@@ -190,9 +190,9 @@ export function loadRunSessionContext(cwd: string, slug: string): RunSessionCont
 
   return {
     task: meta.task,
-    piece: meta.piece,
+    workflow: meta.workflow,
     status: meta.status,
-    movementLogs,
+    stepLogs,
     reports,
   };
 }
@@ -224,12 +224,12 @@ export function loadPreviousOrderContent(cwd: string, taskContent: string): stri
  */
 export function formatRunSessionForPrompt(ctx: RunSessionContext): {
   runTask: string;
-  runPiece: string;
+  runWorkflow: string;
   runStatus: string;
-  runMovementLogs: string;
+  runStepLogs: string;
   runReports: string;
 } {
-  const logLines = ctx.movementLogs.map((log) => {
+  const logLines = ctx.stepLogs.map((log) => {
     const header = `### ${log.step} (${log.persona}) — ${log.status}`;
     return `${header}\n${log.content}`;
   });
@@ -240,9 +240,9 @@ export function formatRunSessionForPrompt(ctx: RunSessionContext): {
 
   return {
     runTask: ctx.task,
-    runPiece: ctx.piece,
+    runWorkflow: ctx.workflow,
     runStatus: ctx.status,
-    runMovementLogs: logLines.join('\n\n'),
+    runStepLogs: logLines.join('\n\n'),
     runReports: reportLines.join('\n\n'),
   };
 }

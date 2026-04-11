@@ -39,6 +39,7 @@ describe('loadGlobalConfig', () => {
     }
     delete process.env.TAKT_INTERACTIVE_PREVIEW_STEPS;
     delete process.env.TAKT_INTERACTIVE_PREVIEW_MOVEMENTS;
+    delete process.env.TAKT_PIECE_RUNTIME_PREPARE;
   });
 
   it('should return default values when config.yaml does not exist', () => {
@@ -58,7 +59,7 @@ describe('loadGlobalConfig', () => {
     expect(config.minimalOutput).toBeUndefined();
     expect(config.concurrency).toBeUndefined();
     expect(config.taskPollIntervalMs).toBeUndefined();
-    expect(config.interactivePreviewMovements).toBeUndefined();
+    expect(config.interactivePreviewSteps).toBeUndefined();
   });
 
   it('should accept project-local keys in global config.yaml', () => {
@@ -77,7 +78,7 @@ describe('loadGlobalConfig', () => {
         'minimal_output: true',
         'concurrency: 3',
         'task_poll_interval_ms: 1000',
-        'interactive_preview_movements: 2',
+        'interactive_preview_steps: 2',
       ].join('\n'),
       'utf-8',
     );
@@ -90,7 +91,7 @@ describe('loadGlobalConfig', () => {
     expect(config.minimalOutput).toBe(true);
     expect(config.concurrency).toBe(3);
     expect(config.taskPollIntervalMs).toBe(1000);
-    expect(config.interactivePreviewMovements).toBe(2);
+    expect(config.interactivePreviewSteps).toBe(2);
   });
 
   it('should load takt_providers.assistant from global config.yaml', () => {
@@ -128,7 +129,7 @@ describe('loadGlobalConfig', () => {
     config.minimalOutput = true;
     config.concurrency = 4;
     config.taskPollIntervalMs = 1200;
-    config.interactivePreviewMovements = 1;
+    config.interactivePreviewSteps = 1;
     config.allowGitHooks = true;
     config.allowGitFilters = true;
     saveGlobalConfig(config);
@@ -583,8 +584,8 @@ describe('loadGlobalConfig', () => {
         'language: en',
         'notification_sound_events:',
         '  iteration_limit: false',
-        '  piece_complete: true',
-        '  piece_abort: true',
+        '  workflow_complete: true',
+        '  workflow_abort: true',
         '  run_complete: true',
         '  run_abort: false',
       ].join('\n'),
@@ -594,8 +595,8 @@ describe('loadGlobalConfig', () => {
     const config = loadGlobalConfig();
     expect(config.notificationSoundEvents).toEqual({
       iterationLimit: false,
-      pieceComplete: true,
-      pieceAbort: true,
+      workflowComplete: true,
+      workflowAbort: true,
       runComplete: true,
       runAbort: false,
     });
@@ -720,8 +721,8 @@ describe('loadGlobalConfig', () => {
     const config = loadGlobalConfig();
     config.notificationSoundEvents = {
       iterationLimit: false,
-      pieceComplete: true,
-      pieceAbort: false,
+      workflowComplete: true,
+      workflowAbort: false,
       runComplete: true,
       runAbort: true,
     };
@@ -731,14 +732,14 @@ describe('loadGlobalConfig', () => {
     const reloaded = loadGlobalConfig();
     expect(reloaded.notificationSoundEvents).toEqual({
       iterationLimit: false,
-      pieceComplete: true,
-      pieceAbort: false,
+      workflowComplete: true,
+      workflowAbort: false,
       runComplete: true,
       runAbort: true,
     });
   });
 
-  it('should accept interactive_preview_movements in global config', () => {
+  it('should reject the removed preview count key in global config', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
@@ -747,9 +748,7 @@ describe('loadGlobalConfig', () => {
       'utf-8',
     );
 
-    expect(() => loadGlobalConfig()).not.toThrow();
-    const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(5);
+    expect(() => loadGlobalConfig()).toThrow(/interactive_preview_movements/);
   });
 
   it('should accept interactive_preview_steps in global config', () => {
@@ -762,10 +761,10 @@ describe('loadGlobalConfig', () => {
     );
 
     const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(6);
+    expect(config.interactivePreviewSteps).toBe(6);
   });
 
-  it('should prefer interactive_preview_steps when both preview keys match', () => {
+  it('should reject config with both preview keys set', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
@@ -774,37 +773,21 @@ describe('loadGlobalConfig', () => {
       'utf-8',
     );
 
-    const config = loadGlobalConfig();
-
-    expect(config.interactivePreviewMovements).toBe(4);
+    expect(() => loadGlobalConfig()).toThrow(/interactive_preview_movements/);
   });
 
-  it('should fail fast when interactive preview aliases differ in global config', () => {
-    const taktDir = join(testHomeDir, '.takt');
-    mkdirSync(taktDir, { recursive: true });
-    writeFileSync(
-      getGlobalConfigPath(),
-      'language: en\ninteractive_preview_movements: 4\ninteractive_preview_steps: 2\n',
-      'utf-8',
-    );
-
-    expect(() => loadGlobalConfig()).toThrow(
-      'Configuration error: ~/.takt/config.yaml interactive_preview_steps must match interactive_preview_movements when both are set.',
-    );
-  });
-
-  it('should save and reload interactive_preview_movements config', () => {
+  it('should save and reload interactive_preview_steps config', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    config.interactivePreviewMovements = 7;
+    config.interactivePreviewSteps = 7;
     saveGlobalConfig(config);
     invalidateGlobalConfigCache();
 
     const reloaded = loadGlobalConfig();
-    expect(reloaded.interactivePreviewMovements).toBe(7);
+    expect(reloaded.interactivePreviewSteps).toBe(7);
   });
 
   it('should save interactive preview count with canonical step key', () => {
@@ -813,7 +796,7 @@ describe('loadGlobalConfig', () => {
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    config.interactivePreviewMovements = 8;
+    config.interactivePreviewSteps = 8;
     saveGlobalConfig(config);
 
     const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
@@ -821,27 +804,27 @@ describe('loadGlobalConfig', () => {
     expect(raw).not.toContain('interactive_preview_movements:');
   });
 
-  it('should default interactive_preview_movements to undefined', () => {
+  it('should default interactive_preview_steps to undefined', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
     const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBeUndefined();
+    expect(config.interactivePreviewSteps).toBeUndefined();
   });
 
-  it('should accept interactive_preview_movements=0 in global config', () => {
+  it('should accept interactive_preview_steps=0 in global config', () => {
     const taktDir = join(testHomeDir, '.takt');
     mkdirSync(taktDir, { recursive: true });
     writeFileSync(
       getGlobalConfigPath(),
-      'language: en\ninteractive_preview_movements: 0\n',
+      'language: en\ninteractive_preview_steps: 0\n',
       'utf-8',
     );
 
     expect(() => loadGlobalConfig()).not.toThrow();
     const config = loadGlobalConfig();
-    expect(config.interactivePreviewMovements).toBe(0);
+    expect(config.interactivePreviewSteps).toBe(0);
   });
 
   it('should accept TAKT_INTERACTIVE_PREVIEW_STEPS for global config env override', () => {
@@ -849,24 +832,36 @@ describe('loadGlobalConfig', () => {
 
     const config = loadGlobalConfig();
 
-    expect(config.interactivePreviewMovements).toBe(9);
+    expect(config.interactivePreviewSteps).toBe(9);
   });
 
-  it('should accept legacy TAKT_INTERACTIVE_PREVIEW_MOVEMENTS for global config env override', () => {
+  it('should reject legacy TAKT_INTERACTIVE_PREVIEW_MOVEMENTS for global config env override', () => {
     process.env.TAKT_INTERACTIVE_PREVIEW_MOVEMENTS = '10';
 
-    const config = loadGlobalConfig();
-
-    expect(config.interactivePreviewMovements).toBe(10);
+    expect(() => loadGlobalConfig()).toThrow(/interactive_preview_movements/);
   });
 
-  it('should fail fast when global preview env aliases differ', () => {
+  it('should reject invalid legacy global env values as removed keys before parsing', () => {
+    process.env.TAKT_PIECE_RUNTIME_PREPARE = '{';
+
+    let thrown: unknown;
+    try {
+      loadGlobalConfig();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/piece_runtime_prepare/);
+    expect((thrown as Error).message).toMatch(/workflow_runtime_prepare/);
+    expect((thrown as Error).message).not.toMatch(/valid JSON/);
+  });
+
+  it('should reject global preview env when legacy key is present', () => {
     process.env.TAKT_INTERACTIVE_PREVIEW_MOVEMENTS = '3';
     process.env.TAKT_INTERACTIVE_PREVIEW_STEPS = '2';
 
-    expect(() => loadGlobalConfig()).toThrow(
-      'Configuration error: ~/.takt/config.yaml interactive_preview_steps must match interactive_preview_movements when both are set.',
-    );
+    expect(() => loadGlobalConfig()).toThrow(/interactive_preview_movements/);
   });
 
   describe('persona_providers', () => {
@@ -950,47 +945,47 @@ describe('loadGlobalConfig', () => {
       expect(reloaded.runtime).toEqual({ prepare: ['gradle', 'node'] });
     });
 
-    it('should load piece_runtime_prepare from config.yaml', () => {
+    it('should load workflow_runtime_prepare from config.yaml', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(
         getGlobalConfigPath(),
         [
           'language: en',
-          'piece_runtime_prepare:',
+          'workflow_runtime_prepare:',
           '  custom_scripts: true',
         ].join('\n'),
         'utf-8',
       );
 
       const config = loadGlobalConfig();
-      expect(config.pieceRuntimePrepare).toEqual({ customScripts: true });
+      expect(config.workflowRuntimePrepare).toEqual({ customScripts: true });
     });
 
-    it('should save and reload piece_runtime_prepare', () => {
+    it('should save and reload workflow_runtime_prepare', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
       const config = loadGlobalConfig();
-      config.pieceRuntimePrepare = { customScripts: true };
+      config.workflowRuntimePrepare = { customScripts: true };
       saveGlobalConfig(config);
       invalidateGlobalConfigCache();
 
       const reloaded = loadGlobalConfig();
-      expect(reloaded.pieceRuntimePrepare).toEqual({ customScripts: true });
+      expect(reloaded.workflowRuntimePrepare).toEqual({ customScripts: true });
     });
   });
 
-  describe('piece_arpeggio global config', () => {
-    it('should load piece_arpeggio from config.yaml', () => {
+  describe('workflow_arpeggio global config', () => {
+    it('should load workflow_arpeggio from config.yaml', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(
         getGlobalConfigPath(),
         [
           'language: en',
-          'piece_arpeggio:',
+          'workflow_arpeggio:',
           '  custom_data_source_modules: true',
           '  custom_merge_inline_js: false',
           '  custom_merge_files: true',
@@ -999,25 +994,25 @@ describe('loadGlobalConfig', () => {
       );
 
       const config = loadGlobalConfig();
-      expect(config.pieceArpeggio).toEqual({
+      expect(config.workflowArpeggio).toEqual({
         customDataSourceModules: true,
         customMergeInlineJs: false,
         customMergeFiles: true,
       });
     });
 
-    it('should save and reload piece_arpeggio', () => {
+    it('should save and reload workflow_arpeggio', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
       const config = loadGlobalConfig();
-      config.pieceArpeggio = { customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false };
+      config.workflowArpeggio = { customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false };
       saveGlobalConfig(config);
       invalidateGlobalConfigCache();
 
       const reloaded = loadGlobalConfig();
-      expect(reloaded.pieceArpeggio).toEqual({ customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false });
+      expect(reloaded.workflowArpeggio).toEqual({ customDataSourceModules: true, customMergeInlineJs: true, customMergeFiles: false });
     });
   });
 
@@ -1054,32 +1049,32 @@ describe('loadGlobalConfig', () => {
     });
   });
 
-  describe('piece_mcp_servers global config', () => {
-    it('should load piece_mcp_servers from config.yaml', () => {
+  describe('workflow_mcp_servers global config', () => {
+    it('should load workflow_mcp_servers from config.yaml', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(
         getGlobalConfigPath(),
-        ['language: en', 'piece_mcp_servers:', '  stdio: true', '  sse: false', '  http: true'].join('\n'),
+        ['language: en', 'workflow_mcp_servers:', '  stdio: true', '  sse: false', '  http: true'].join('\n'),
         'utf-8',
       );
 
       const config = loadGlobalConfig();
-      expect(config.pieceMcpServers).toEqual({ stdio: true, sse: false, http: true });
+      expect(config.workflowMcpServers).toEqual({ stdio: true, sse: false, http: true });
     });
 
-    it('should save and reload piece_mcp_servers', () => {
+    it('should save and reload workflow_mcp_servers', () => {
       const taktDir = join(testHomeDir, '.takt');
       mkdirSync(taktDir, { recursive: true });
       writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
 
       const config = loadGlobalConfig();
-      config.pieceMcpServers = { stdio: true, sse: true };
+      config.workflowMcpServers = { stdio: true, sse: true };
       saveGlobalConfig(config);
       invalidateGlobalConfigCache();
 
       const reloaded = loadGlobalConfig();
-      expect(reloaded.pieceMcpServers).toEqual({ stdio: true, sse: true });
+      expect(reloaded.workflowMcpServers).toEqual({ stdio: true, sse: true });
     });
   });
 

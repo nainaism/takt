@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveAgentProviderModel,
-  resolveLoopMonitorJudgeProviderModel,
-  resolveMovementProviderModel,
-} from '../core/piece/provider-resolution.js';
+  resolveStepProviderModel,
+} from '../core/workflow/provider-resolution.js';
+import { resolveLoopMonitorJudgeProviderModel } from '../core/workflow/provider-resolution.js';
 import {
   resolveModelFromCandidates,
   resolveProviderModelCandidates,
@@ -33,9 +33,9 @@ describe('resolveProviderModelCandidates', () => {
   });
 });
 
-describe('resolveMovementProviderModel', () => {
+describe('resolveStepProviderModel', () => {
   it('should prefer personaProviders.provider over step.provider when both are defined', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: 'codex', model: undefined, personaDisplayName: 'coder' },
       provider: 'claude',
       personaProviders: { coder: { provider: 'opencode' } },
@@ -45,7 +45,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should use personaProviders.provider when step.provider is undefined', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'reviewer' },
       provider: 'claude',
       personaProviders: { reviewer: { provider: 'opencode' } },
@@ -55,7 +55,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should fallback to input.provider when persona mapping is missing', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'unknown' },
       provider: 'mock',
       personaProviders: { reviewer: { provider: 'codex' } },
@@ -65,7 +65,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should return undefined provider when all provider candidates are missing', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'none' },
       provider: undefined,
       personaProviders: undefined,
@@ -75,7 +75,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should prefer personaProviders.model over step.model and input.model', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: 'step-model', personaDisplayName: 'coder' },
       model: 'input-model',
       personaProviders: { coder: { provider: 'codex', model: 'persona-model' } },
@@ -85,7 +85,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should use personaProviders.model when step.model is undefined', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'coder' },
       model: 'input-model',
       personaProviders: { coder: { provider: 'codex', model: 'persona-model' } },
@@ -95,7 +95,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should fallback to input.model when step.model and personaProviders.model are undefined', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'coder' },
       model: 'input-model',
       personaProviders: { coder: { provider: 'codex' } },
@@ -105,7 +105,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should return undefined model when all model candidates are missing', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'coder' },
       model: undefined,
       personaProviders: { coder: { provider: 'codex' } },
@@ -115,7 +115,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should resolve provider from personaProviders entry with only model specified', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'coder' },
       provider: 'claude',
       personaProviders: { coder: { model: 'o3-mini' } },
@@ -126,7 +126,7 @@ describe('resolveMovementProviderModel', () => {
   });
 
   it('should resolve cursor provider from personaProviders', () => {
-    const result = resolveMovementProviderModel({
+    const result = resolveStepProviderModel({
       step: { provider: undefined, model: undefined, personaDisplayName: 'coder' },
       provider: 'claude',
       personaProviders: { coder: { provider: 'cursor' } },
@@ -463,7 +463,7 @@ describe('resolveAgentProviderModel', () => {
 });
 
 describe('resolveLoopMonitorJudgeProviderModel', () => {
-  it('should inherit provider and model resolved from personaProviders on the triggering movement', () => {
+  it('should inherit provider and model resolved from personaProviders on the triggering step', () => {
     const result = resolveLoopMonitorJudgeProviderModel({
       judge: { provider: undefined, model: 'opencode/model-b' },
       triggeringStep: {

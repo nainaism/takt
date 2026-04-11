@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { TracedValue } from 'traced-config';
 import { applyLegacyEnvSpecs } from '../infra/config/traced/tracedConfigLegacyEnvAdapter.js';
 import { loadProjectConfigTrace } from '../infra/config/traced/tracedConfigLoader.js';
 import { getGlobalTracedSchema, getProjectTracedSchema } from '../infra/config/traced/tracedConfigSchema.js';
@@ -47,23 +46,14 @@ describe('traced config boundaries', () => {
     vi.restoreAllMocks();
   });
 
-  it('legacy env adapter applies only unblocked legacy overrides', () => {
+  it('legacy env adapter rejects removed legacy overrides', () => {
     process.env.TAKT_LOG_LEVEL = 'debug';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const rawConfig: Record<string, unknown> = {};
-    const traceEntries = new Map<string, TracedValue<unknown>>();
 
-    applyLegacyEnvSpecs(rawConfig, traceEntries, [{
+    expect(() => applyLegacyEnvSpecs([{
       env: 'TAKT_LOG_LEVEL',
       path: 'logging.level',
-      type: 'string',
-      blockedBy: ['TAKT_LOGGING_LEVEL'],
-      warning: 'deprecated',
-    }]);
-
-    expect(rawConfig).toEqual({ logging: { level: 'debug' } });
-    expect(traceEntries.get('logging.level')?.origin).toBe('env');
-    expect(warnSpy).toHaveBeenCalledWith('deprecated');
+      canonicalPath: 'logging.verbosity',
+    }])).toThrow(/logging\.level.*logging\.verbosity/);
   });
 
   it('runtime bridge keeps parent/child traced origins with actual traced-config runtime', () => {

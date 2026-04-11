@@ -19,7 +19,7 @@ export interface TaskResult {
   success: boolean;
   response: string;
   executionLog: string[];
-  failureMovement?: string;
+  failureStep?: string;
   failureLastMessage?: string;
   startedAt: string;
   completedAt: string;

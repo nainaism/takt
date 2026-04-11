@@ -3,12 +3,10 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
   getBuiltinWorkflowsDir,
-  getGlobalPiecesDir,
   getGlobalWorkflowsDir,
-  getProjectPiecesDir,
   getProjectWorkflowsDir,
-  isPiecePath,
-  resolvePieceConfigValue,
+  isWorkflowPath,
+  resolveWorkflowConfigValue,
 } from '../../infra/config/index.js';
 import { error, success, warn } from '../../shared/ui/index.js';
 import { sanitizeTerminalText } from '../../shared/utils/text.js';
@@ -25,12 +23,10 @@ function resolveInputPath(input: string, baseDir: string): string {
 }
 
 function resolveNamedWorkflowPath(name: string, projectDir: string): string | undefined {
-  const lang = resolvePieceConfigValue(projectDir, 'language');
+  const lang = resolveWorkflowConfigValue(projectDir, 'language');
   const candidateDirs = [
     getProjectWorkflowsDir(projectDir),
-    getProjectPiecesDir(projectDir),
     getGlobalWorkflowsDir(),
-    getGlobalPiecesDir(),
     getBuiltinWorkflowsDir(lang),
   ];
 
@@ -69,12 +65,11 @@ function resolveWorkflowTargets(targets: string[], projectDir: string): string[]
   if (targets.length === 0) {
     return [
       ...collectWorkflowFiles(getProjectWorkflowsDir(projectDir)),
-      ...collectWorkflowFiles(getProjectPiecesDir(projectDir)),
     ];
   }
 
   return targets.map((target) => {
-    if (isPiecePath(target)) {
+    if (isWorkflowPath(target)) {
       return resolveInputPath(target, projectDir);
     }
 

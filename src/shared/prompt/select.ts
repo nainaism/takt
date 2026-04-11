@@ -54,6 +54,7 @@ function setupRawMode(): { cleanup: (listener: (data: Buffer) => void) => void; 
   };
 }
 
+/** Redraw the menu using relative cursor motion. */
 function redrawMenu<T extends string>(
   options: SelectOptionItem<T>[],
   selectedIndex: number,

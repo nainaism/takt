@@ -206,15 +206,15 @@ export async function resolveExecutionContext(
   return { execCwd: cwd, branch, baseBranch, isWorktree: false };
 }
 
-export async function runPiece(
+export async function runWorkflow(
   projectCwd: string,
-  piece: string,
+  workflow: string,
   task: string,
   execCwd: string,
   options: Pick<PipelineExecutionOptions, 'provider' | 'model'>,
 ): Promise<boolean> {
-  const safePiece = sanitizeTerminalText(piece);
-  info(`Running workflow: ${safePiece}`);
+  const safeWorkflow = sanitizeTerminalText(workflow);
+  info(`Running workflow: ${safeWorkflow}`);
   const agentOverrides: TaskExecutionOptions | undefined = (options.provider || options.model)
     ? { provider: options.provider, model: options.model }
     : undefined;
@@ -225,7 +225,7 @@ export async function runPiece(
     taskSuccess = await executeTask({
       task,
       cwd: execCwd,
-      pieceIdentifier: piece,
+      workflowIdentifier: workflow,
       projectCwd,
       agentOverrides,
     });
@@ -234,10 +234,10 @@ export async function runPiece(
   }
 
   if (!taskSuccess) {
-    error(`Workflow '${safePiece}' failed`);
+    error(`Workflow '${safeWorkflow}' failed`);
     return false;
   }
-  success(`Workflow '${safePiece}' completed`);
+  success(`Workflow '${safeWorkflow}' completed`);
   return true;
 }
 
@@ -280,14 +280,14 @@ export function submitPullRequest(
   branch: string,
   baseBranch: string,
   taskContent: TaskContent,
-  piece: string,
+  workflow: string,
   pipelineConfig: PipelineConfig | undefined,
   options: Pick<PipelineExecutionOptions, 'task' | 'repo' | 'draftPr'>,
 ): string | undefined {
   info('Creating pull request...');
   const resolvedBaseBranch = requireBaseBranch(baseBranch, 'pull request creation');
   const prTitle = taskContent.issue ? `[#${taskContent.issue.number}] ${taskContent.issue.title}` : (options.task ?? 'Pipeline task');
-  const report = `Workflow \`${piece}\` completed successfully.`;
+  const report = `Workflow \`${workflow}\` completed successfully.`;
   const prBody = buildPipelinePrBody(pipelineConfig, taskContent.issue, report);
 
   const prResult: CreatePrResult = createPullRequestSafely(getGitProvider(), {

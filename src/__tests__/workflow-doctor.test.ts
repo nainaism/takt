@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inspectWorkflowFile } from '../infra/config/loaders/workflowDoctor.js';
-import { loadPieceFromFile } from '../infra/config/loaders/pieceParser.js';
+import { loadWorkflowFromFile } from '../infra/config/loaders/workflowFileLoader.js';
 import { doctorWorkflowCommand } from '../features/workflowAuthoring/doctor.js';
 
 const mockSuccess = vi.fn();
@@ -334,9 +334,9 @@ steps:
     mkdirSync(join(projectDir, '.takt/facets/output-contracts'), { recursive: true });
     writeFileSync(join(projectDir, '.takt/facets/output-contracts/plan.md'), '# Plan', 'utf-8');
 
-    const config = loadPieceFromFile(filePath, projectDir);
+    const config = loadWorkflowFromFile(filePath, projectDir);
 
-    expect(config.movements[0]?.outputContracts?.[0]).toMatchObject({
+    expect(config.steps[0]?.outputContracts?.[0]).toMatchObject({
       name: '00-plan.md',
       order: 'Output to {report:00-plan.md} file.',
     });

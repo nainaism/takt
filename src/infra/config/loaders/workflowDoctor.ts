@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { PieceConfigRawSchema } from '../../../core/models/index.js';
-import type { PieceConfig } from '../../../core/models/index.js';
-import { resolvePieceConfigValue } from '../resolvePieceConfigValue.js';
+import { WorkflowConfigRawSchema } from '../../../core/models/index.js';
+import type { WorkflowConfig } from '../../../core/models/index.js';
+import { resolveWorkflowConfigValue } from '../resolveWorkflowConfigValue.js';
 import { getRepertoireDir } from '../paths.js';
-import { loadPieceFromFile } from './pieceParser.js';
-import { formatPieceLoadWarning } from './pieceLoadWarning.js';
+import { loadWorkflowFromFile } from './workflowFileLoader.js';
+import { formatWorkflowLoadWarning } from './workflowLoadWarning.js';
 import {
   type FacetResolutionContext,
-  type PieceSections,
+  type WorkflowSections,
   isResourcePath,
   resolveFacetPath,
   resolvePersona,
@@ -27,8 +27,8 @@ export type WorkflowDoctorReport = {
   filePath: string;
 };
 
-type RawWorkflow = ReturnType<typeof PieceConfigRawSchema.parse>;
-type RawMovement = RawWorkflow['movements'][number];
+type RawWorkflow = ReturnType<typeof WorkflowConfigRawSchema.parse>;
+type RawStep = RawWorkflow['steps'][number];
 
 const SPECIAL_NEXT = new Set(['COMPLETE', 'ABORT']);
 
@@ -38,20 +38,20 @@ function isNamedRef(ref: string): boolean {
 
 function buildContext(projectDir: string, filePath: string): FacetResolutionContext {
   return {
-    lang: resolvePieceConfigValue(projectDir, 'language'),
-    pieceDir: dirname(filePath),
+    lang: resolveWorkflowConfigValue(projectDir, 'language'),
+    workflowDir: dirname(filePath),
     projectDir,
     repertoireDir: getRepertoireDir(),
   };
 }
 
-function buildSections(raw: RawWorkflow, pieceDir: string): PieceSections {
+function buildSections(raw: RawWorkflow, workflowDir: string): WorkflowSections {
   return {
     personas: raw.personas,
-    resolvedInstructions: resolveSectionMap(raw.instructions, pieceDir),
-    resolvedKnowledge: resolveSectionMap(raw.knowledge, pieceDir),
-    resolvedPolicies: resolveSectionMap(raw.policies, pieceDir),
-    resolvedReportFormats: resolveSectionMap(raw.report_formats, pieceDir),
+    resolvedInstructions: resolveSectionMap(raw.instructions, workflowDir),
+    resolvedKnowledge: resolveSectionMap(raw.knowledge, workflowDir),
+    resolvedPolicies: resolveSectionMap(raw.policies, workflowDir),
+    resolvedReportFormats: resolveSectionMap(raw.report_formats, workflowDir),
   };
 }
 
@@ -106,16 +106,16 @@ function validateScalarRefs(
   }
 }
 
-function collectStepEdges(config: PieceConfig): Map<string, Set<string>> {
+function collectStepEdges(config: WorkflowConfig): Map<string, Set<string>> {
   const edges = new Map<string, Set<string>>();
-  for (const movement of config.movements) {
+  for (const step of config.steps) {
     const nextSteps = new Set<string>();
-    for (const rule of movement.rules ?? []) {
+    for (const rule of step.rules ?? []) {
       if (rule.next && !SPECIAL_NEXT.has(rule.next)) {
         nextSteps.add(rule.next);
       }
     }
-    edges.set(movement.name, nextSteps);
+    edges.set(step.name, nextSteps);
   }
 
   for (const monitor of config.loopMonitors ?? []) {
@@ -137,10 +137,10 @@ function collectStepEdges(config: PieceConfig): Map<string, Set<string>> {
   return edges;
 }
 
-function collectReachableSteps(config: PieceConfig): Set<string> {
+function collectReachableSteps(config: WorkflowConfig): Set<string> {
   const edges = collectStepEdges(config);
   const visited = new Set<string>();
-  const queue = [config.initialMovement];
+  const queue = [config.initialStep];
 
   while (queue.length > 0) {
     const current = queue.shift();
@@ -167,48 +167,48 @@ function collectUsedLocalKeys(raw: RawWorkflow): Record<'personas' | 'policies' 
     report_formats: new Set<string>(),
   };
 
-  const collectMovement = (movement: RawMovement): void => {
-    if (movement.persona && isNamedRef(movement.persona)) {
-      used.personas.add(movement.persona);
+  const collectStep = (step: RawStep): void => {
+    if (step.persona && isNamedRef(step.persona)) {
+      used.personas.add(step.persona);
     }
-    if (movement.team_leader?.persona && isNamedRef(movement.team_leader.persona)) {
-      used.personas.add(movement.team_leader.persona);
+    if (step.team_leader?.persona && isNamedRef(step.team_leader.persona)) {
+      used.personas.add(step.team_leader.persona);
     }
-    if (movement.team_leader?.part_persona && isNamedRef(movement.team_leader.part_persona)) {
-      used.personas.add(movement.team_leader.part_persona);
-    }
-
-    if (movement.instruction && isNamedRef(movement.instruction)) {
-      used.instructions.add(movement.instruction);
+    if (step.team_leader?.part_persona && isNamedRef(step.team_leader.part_persona)) {
+      used.personas.add(step.team_leader.part_persona);
     }
 
-    const policyRefs = Array.isArray(movement.policy) ? movement.policy : movement.policy ? [movement.policy] : [];
+    if (step.instruction && isNamedRef(step.instruction)) {
+      used.instructions.add(step.instruction);
+    }
+
+    const policyRefs = Array.isArray(step.policy) ? step.policy : step.policy ? [step.policy] : [];
     for (const ref of policyRefs) {
       if (isNamedRef(ref)) {
         used.policies.add(ref);
       }
     }
 
-    const knowledgeRefs = Array.isArray(movement.knowledge) ? movement.knowledge : movement.knowledge ? [movement.knowledge] : [];
+    const knowledgeRefs = Array.isArray(step.knowledge) ? step.knowledge : step.knowledge ? [step.knowledge] : [];
     for (const ref of knowledgeRefs) {
       if (isNamedRef(ref)) {
         used.knowledge.add(ref);
       }
     }
 
-    for (const report of movement.output_contracts?.report ?? []) {
+    for (const report of step.output_contracts?.report ?? []) {
       if (isNamedRef(report.format)) {
         used.report_formats.add(report.format);
       }
     }
 
-    for (const sub of movement.parallel ?? []) {
-      collectMovement(sub as RawMovement);
+    for (const sub of step.parallel ?? []) {
+      collectStep(sub as RawStep);
     }
   };
 
-  for (const movement of raw.movements) {
-    collectMovement(movement);
+  for (const step of raw.steps) {
+    collectStep(step);
   }
 
   for (const monitor of raw.loop_monitors ?? []) {
@@ -246,64 +246,64 @@ function collectUnusedSectionWarnings(raw: RawWorkflow, diagnostics: WorkflowDia
   }
 }
 
-function validateMovementRefs(
-  movement: RawMovement,
-  sections: PieceSections,
+function validateStepRefs(
+  step: RawStep,
+  sections: WorkflowSections,
   context: FacetResolutionContext,
   diagnostics: WorkflowDiagnostic[],
   label: string,
 ): void {
-  const pieceDir = context.pieceDir!;
-  if (movement.persona && isNamedRef(movement.persona)) {
+  const workflowDir = context.workflowDir!;
+  if (step.persona && isNamedRef(step.persona)) {
     appendMissingRef(
       diagnostics,
       `${label} persona`,
-      movement.persona,
-      () => sections.personas?.[movement.persona!] !== undefined
-        || resolvePersona(movement.persona, sections, pieceDir, context).personaPath !== undefined,
+      step.persona,
+      () => sections.personas?.[step.persona!] !== undefined
+        || resolvePersona(step.persona, sections, workflowDir, context).personaPath !== undefined,
     );
   }
-  if (movement.team_leader?.persona && isNamedRef(movement.team_leader.persona)) {
+  if (step.team_leader?.persona && isNamedRef(step.team_leader.persona)) {
     appendMissingRef(
       diagnostics,
       `${label} team_leader persona`,
-      movement.team_leader.persona,
-      () => sections.personas?.[movement.team_leader!.persona!] !== undefined
-        || resolvePersona(movement.team_leader!.persona, sections, pieceDir, context).personaPath !== undefined,
+      step.team_leader.persona,
+      () => sections.personas?.[step.team_leader!.persona!] !== undefined
+        || resolvePersona(step.team_leader!.persona, sections, workflowDir, context).personaPath !== undefined,
     );
   }
-  if (movement.team_leader?.part_persona && isNamedRef(movement.team_leader.part_persona)) {
+  if (step.team_leader?.part_persona && isNamedRef(step.team_leader.part_persona)) {
     appendMissingRef(
       diagnostics,
       `${label} team_leader part_persona`,
-      movement.team_leader.part_persona,
-      () => sections.personas?.[movement.team_leader!.part_persona!] !== undefined
-        || resolvePersona(movement.team_leader!.part_persona, sections, pieceDir, context).personaPath !== undefined,
+      step.team_leader.part_persona,
+      () => sections.personas?.[step.team_leader!.part_persona!] !== undefined
+        || resolvePersona(step.team_leader!.part_persona, sections, workflowDir, context).personaPath !== undefined,
     );
   }
   validateScalarRefs(
     diagnostics,
     `${label} policy`,
-    Array.isArray(movement.policy)
-      ? movement.policy.filter(isNamedRef)
-      : movement.policy && isNamedRef(movement.policy) ? movement.policy : undefined,
+    Array.isArray(step.policy)
+      ? step.policy.filter(isNamedRef)
+      : step.policy && isNamedRef(step.policy) ? step.policy : undefined,
     (ref) => canResolveNamedFacetRef(ref, sections.resolvedPolicies, 'policies', context),
   );
   validateScalarRefs(
     diagnostics,
     `${label} knowledge`,
-    Array.isArray(movement.knowledge)
-      ? movement.knowledge.filter(isNamedRef)
-      : movement.knowledge && isNamedRef(movement.knowledge) ? movement.knowledge : undefined,
+    Array.isArray(step.knowledge)
+      ? step.knowledge.filter(isNamedRef)
+      : step.knowledge && isNamedRef(step.knowledge) ? step.knowledge : undefined,
     (ref) => canResolveNamedFacetRef(ref, sections.resolvedKnowledge, 'knowledge', context),
   );
-  if (movement.instruction && isNamedRef(movement.instruction)) {
+  if (step.instruction && isNamedRef(step.instruction)) {
     appendMissingRef(
       diagnostics,
       `${label} instruction`,
-      movement.instruction,
+      step.instruction,
       () => canResolveNamedFacetRef(
-        movement.instruction!,
+        step.instruction!,
         sections.resolvedInstructions,
         'instructions',
         context,
@@ -311,7 +311,7 @@ function validateMovementRefs(
     );
   }
 
-  for (const report of movement.output_contracts?.report ?? []) {
+  for (const report of step.output_contracts?.report ?? []) {
     if (isNamedRef(report.format)) {
       appendMissingRef(
         diagnostics,
@@ -327,18 +327,18 @@ function validateMovementRefs(
     }
   }
 
-  for (const sub of movement.parallel ?? []) {
-    validateMovementRefs(sub as RawMovement, sections, context, diagnostics, `${label}/${sub.name}`);
+  for (const sub of step.parallel ?? []) {
+    validateStepRefs(sub as RawStep, sections, context, diagnostics, `${label}/${sub.name}`);
   }
 }
 
 function validateLoopMonitorRefs(
   raw: RawWorkflow,
-  sections: PieceSections,
+  sections: WorkflowSections,
   context: FacetResolutionContext,
   diagnostics: WorkflowDiagnostic[],
 ): void {
-  const pieceDir = context.pieceDir!;
+  const workflowDir = context.workflowDir!;
   for (const monitor of raw.loop_monitors ?? []) {
     const label = `loop monitor (${monitor.cycle.join(' -> ')})`;
     if (monitor.judge.persona && isNamedRef(monitor.judge.persona)) {
@@ -347,7 +347,7 @@ function validateLoopMonitorRefs(
         `${label} persona`,
         monitor.judge.persona,
         () => sections.personas?.[monitor.judge.persona!] !== undefined
-          || resolvePersona(monitor.judge.persona, sections, pieceDir, context).personaPath !== undefined,
+          || resolvePersona(monitor.judge.persona, sections, workflowDir, context).personaPath !== undefined,
       );
     }
     if (monitor.judge.instruction && isNamedRef(monitor.judge.instruction)) {
@@ -366,34 +366,34 @@ function validateLoopMonitorRefs(
   }
 }
 
-function validateNextTargets(config: PieceConfig, raw: RawWorkflow, diagnostics: WorkflowDiagnostic[]): void {
-  const movementNames = new Set(config.movements.map((movement) => movement.name));
-  if (!movementNames.has(config.initialMovement)) {
+function validateNextTargets(config: WorkflowConfig, raw: RawWorkflow, diagnostics: WorkflowDiagnostic[]): void {
+  const stepNames = new Set(config.steps.map((step) => step.name));
+  if (!stepNames.has(config.initialStep)) {
     diagnostics.push({
       level: 'error',
-      message: `initial_step references missing step "${config.initialMovement}"`,
+      message: `initial_step references missing step "${config.initialStep}"`,
     });
   }
 
-  for (const movement of config.movements) {
-    for (const rule of movement.rules ?? []) {
-      if (!rule.next || SPECIAL_NEXT.has(rule.next) || movementNames.has(rule.next)) {
+  for (const step of config.steps) {
+    for (const rule of step.rules ?? []) {
+      if (!rule.next || SPECIAL_NEXT.has(rule.next) || stepNames.has(rule.next)) {
         continue;
       }
       diagnostics.push({
         level: 'error',
-        message: `Step "${movement.name}" routes to unknown next step "${rule.next}"`,
+        message: `Step "${step.name}" routes to unknown next step "${rule.next}"`,
       });
     }
 
-    for (const sub of movement.parallel ?? []) {
+    for (const sub of step.parallel ?? []) {
       for (const rule of sub.rules ?? []) {
-        if (!rule.next || SPECIAL_NEXT.has(rule.next) || movementNames.has(rule.next)) {
+        if (!rule.next || SPECIAL_NEXT.has(rule.next) || stepNames.has(rule.next)) {
           continue;
         }
         diagnostics.push({
           level: 'error',
-          message: `Step "${movement.name}/${sub.name}" routes to unknown next step "${rule.next}"`,
+          message: `Step "${step.name}/${sub.name}" routes to unknown next step "${rule.next}"`,
         });
       }
     }
@@ -402,7 +402,7 @@ function validateNextTargets(config: PieceConfig, raw: RawWorkflow, diagnostics:
   for (const monitor of raw.loop_monitors ?? []) {
     const label = monitor.cycle.join(' -> ');
     for (const rule of monitor.judge.rules) {
-      if (!rule.next || SPECIAL_NEXT.has(rule.next) || movementNames.has(rule.next)) {
+      if (!rule.next || SPECIAL_NEXT.has(rule.next) || stepNames.has(rule.next)) {
         continue;
       }
       diagnostics.push({
@@ -413,10 +413,10 @@ function validateNextTargets(config: PieceConfig, raw: RawWorkflow, diagnostics:
   }
 }
 
-function validateReachability(config: PieceConfig, diagnostics: WorkflowDiagnostic[]): void {
+function validateReachability(config: WorkflowConfig, diagnostics: WorkflowDiagnostic[]): void {
   const reachable = collectReachableSteps(config);
-  const unreachable = config.movements
-    .map((movement) => movement.name)
+  const unreachable = config.steps
+    .map((step) => step.name)
     .filter((name) => !reachable.has(name));
 
   if (unreachable.length === 0) {
@@ -430,23 +430,23 @@ function validateReachability(config: PieceConfig, diagnostics: WorkflowDiagnost
 }
 
 export function inspectWorkflowFile(filePath: string, projectDir: string): WorkflowDoctorReport {
-  let config: PieceConfig;
+  let config: WorkflowConfig;
   try {
-    config = loadPieceFromFile(filePath, projectDir);
+    config = loadWorkflowFromFile(filePath, projectDir);
   } catch (error) {
     return {
-      diagnostics: [{ level: 'error', message: formatPieceLoadWarning(basename(filePath), error) }],
+      diagnostics: [{ level: 'error', message: formatWorkflowLoadWarning(basename(filePath), error) }],
       filePath,
     };
   }
 
-  const raw = PieceConfigRawSchema.parse(parseYaml(readFileSync(filePath, 'utf-8')));
+  const raw = WorkflowConfigRawSchema.parse(parseYaml(readFileSync(filePath, 'utf-8')));
   const context = buildContext(projectDir, filePath);
-  const sections = buildSections(raw, context.pieceDir!);
+  const sections = buildSections(raw, context.workflowDir!);
   const diagnostics: WorkflowDiagnostic[] = [];
 
-  for (const movement of raw.movements) {
-    validateMovementRefs(movement, sections, context, diagnostics, `step "${movement.name}"`);
+  for (const step of raw.steps) {
+    validateStepRefs(step, sections, context, diagnostics, `step "${step.name}"`);
   }
   validateLoopMonitorRefs(raw, sections, context, diagnostics);
   validateNextTargets(config, raw, diagnostics);

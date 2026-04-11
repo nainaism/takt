@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findRunningStepByRunSlug, readRunMeta } from '../core/piece/run/run-meta.js';
+import { findRunningStepByRunSlug, readRunMeta } from '../core/workflow/run/run-meta.js';
 
 function writeMeta(runRoot: string, slug: string, meta: Record<string, unknown>): void {
   const metaPath = path.join(runRoot, '.takt', 'runs', slug, 'meta.json');
@@ -24,7 +24,7 @@ describe('run-meta lookup', () => {
   it('should read currentStep from the specified run slug even when meta.task differs', () => {
     writeMeta(projectDir, '20260409-run-b', {
       task: 'Stored from .takt/runs/.../context/task',
-      piece: 'default',
+      workflow: 'default',
       runSlug: '20260409-run-b',
       runRoot: '.takt/runs/20260409-run-b',
       reportDirectory: '.takt/runs/20260409-run-b/reports',
@@ -37,7 +37,7 @@ describe('run-meta lookup', () => {
     });
     writeMeta(projectDir, '20260409-run-a', {
       task: 'Other task prompt',
-      piece: 'default',
+      workflow: 'default',
       runSlug: '20260409-run-a',
       runRoot: '.takt/runs/20260409-run-a',
       reportDirectory: '.takt/runs/20260409-run-a/reports',
@@ -63,7 +63,7 @@ describe('run-meta lookup', () => {
     fs.writeFileSync(newestMetaPath, '{ broken json', 'utf-8');
     writeMeta(projectDir, '20260409-run-a', {
       task: 'Force fail me\nwith full prompt',
-      piece: 'default',
+      workflow: 'default',
       runSlug: '20260409-run-a',
       runRoot: '.takt/runs/20260409-run-a',
       reportDirectory: '.takt/runs/20260409-run-a/reports',
@@ -84,7 +84,7 @@ describe('run-meta lookup', () => {
   it('should return undefined when run slug is invalid', () => {
     writeMeta(projectDir, '20260409-run-z', {
       task: 'Force fail me\nwith full prompt',
-      piece: 'default',
+      workflow: 'default',
       runSlug: '20260409-run-z',
       runRoot: '.takt/runs/20260409-run-z',
       reportDirectory: '.takt/runs/20260409-run-z/reports',
@@ -97,7 +97,7 @@ describe('run-meta lookup', () => {
     });
     writeMeta(projectDir, '20260409-run-a', {
       task: 'Force fail me\nwith full prompt',
-      piece: 'default',
+      workflow: 'default',
       runSlug: '20260409-run-a',
       runRoot: '.takt/runs/20260409-run-a',
       reportDirectory: '.takt/runs/20260409-run-a/reports',
