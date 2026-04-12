@@ -4,7 +4,18 @@ import type { StepProviderOptions } from '../../models/workflow-types.js';
 import type { RunAgentOptions } from '../../../agents/runner.js';
 import type { StructuredCaller } from '../../../agents/structured-caller.js';
 import type { PhaseRunnerContext } from '../phase-runner.js';
-import { resolveEffectiveProviderOptions } from '../../../infra/config/providerOptions.js';
+import {
+  resolveEffectiveProviderOptions,
+  resolveEffectiveTeamLeaderPartProviderOptions,
+} from '../../../infra/config/providerOptions.js';
+import {
+  assertProviderResolvedForCapabilitySensitiveOptions,
+  assertProviderSupportsAllowedTools,
+  assertProviderSupportsClaudeAllowedTools,
+  assertProviderSupportsMcpServers,
+  resolveAllowedToolsForProvider,
+} from './engine-provider-options.js';
+import { providerSupportsStructuredOutput } from '../../../infra/providers/provider-capabilities.js';
 import type {
   WorkflowEngineOptions,
   PhaseName,
@@ -29,21 +40,52 @@ export class OptionsBuilder {
     private readonly getWorkflowDescription: () => string | undefined,
   ) {}
 
+  private resolveEngineProviderModel(): StepProviderInfo {
+    return {
+      provider: this.engineOptions.provider,
+      model: this.engineOptions.model,
+    };
+  }
+
   resolveStepProviderModel(step: WorkflowStep, runtime?: RuntimeStepResolution): StepProviderInfo {
     if (runtime?.providerInfo) {
       return runtime.providerInfo;
     }
 
+    const engineProviderInfo = this.resolveEngineProviderModel();
     const resolved = resolveStepProviderModel({
       step,
-      provider: this.engineOptions.provider,
-      model: this.engineOptions.model,
+      provider: engineProviderInfo.provider,
+      model: engineProviderInfo.model,
       personaProviders: this.engineOptions.personaProviders,
     });
     return {
-      provider: resolved.provider ?? this.engineOptions.provider,
-      model: resolved.model ?? this.engineOptions.model,
+      provider: resolved.provider ?? engineProviderInfo.provider,
+      model: resolved.model ?? engineProviderInfo.model,
     };
+  }
+
+  private resolveMergedProviderOptions(
+    step: WorkflowStep,
+    runtime?: RuntimeStepResolution,
+  ): StepProviderOptions | undefined {
+    if (runtime?.teamLeaderPart) {
+      return resolveEffectiveTeamLeaderPartProviderOptions(
+        this.engineOptions.providerOptionsSource,
+        this.engineOptions.providerOptionsOriginResolver,
+        this.engineOptions.providerOptions,
+        step.providerOptions,
+        this.resolveStepProviderModel(step, runtime).provider,
+        runtime.teamLeaderPart.partAllowedTools,
+      );
+    }
+
+    return resolveEffectiveProviderOptions(
+      this.engineOptions.providerOptionsSource,
+      this.engineOptions.providerOptionsOriginResolver,
+      this.engineOptions.providerOptions,
+      step.providerOptions,
+    );
   }
 
   /** Build common RunAgentOptions shared by all phases */
@@ -69,12 +111,7 @@ export class OptionsBuilder {
         requiredPermissionMode: step.requiredPermissionMode,
         providerProfiles: this.engineOptions.providerProfiles,
       },
-      providerOptions: mergedProviderOptions ?? resolveEffectiveProviderOptions(
-        this.engineOptions.providerOptionsSource,
-        this.engineOptions.providerOptionsOriginResolver,
-        this.engineOptions.providerOptions,
-        step.providerOptions,
-      ),
+      providerOptions: mergedProviderOptions ?? this.resolveMergedProviderOptions(step, runtime),
       language: this.getLanguage(),
       onStream: this.engineOptions.onStream,
       onPermissionRequest: this.engineOptions.onPermissionRequest,
@@ -92,30 +129,45 @@ export class OptionsBuilder {
 
   /** Build RunAgentOptions for Phase 1 (main execution) */
   buildAgentOptions(step: WorkflowStep, runtime?: RuntimeStepResolution): RunAgentOptions {
-    const mergedProviderOptions = resolveEffectiveProviderOptions(
-      this.engineOptions.providerOptionsSource,
-      this.engineOptions.providerOptionsOriginResolver,
-      this.engineOptions.providerOptions,
-      step.providerOptions,
-    );
+    const mergedProviderOptions = this.resolveMergedProviderOptions(step, runtime);
+    const { provider: resolvedProvider } = this.resolveStepProviderModel(step, runtime);
+    const usesClaudeAllowedTools = (mergedProviderOptions?.claude?.allowedTools?.length ?? 0) > 0;
+    const usesTeamLeaderPartAllowedTools = (runtime?.teamLeaderPart?.partAllowedTools?.length ?? 0) > 0;
 
-    // Phase 1: exclude Write from allowedTools when the step has output contracts AND edit is NOT enabled
-    // (If edit is enabled, Write is needed for code implementation even if output contracts exist)
-    // Note: edit defaults to undefined, so check !== true to catch both false and undefined
-    const hasOutputContracts = step.outputContracts && step.outputContracts.length > 0;
-    const resolvedAllowedTools = mergedProviderOptions?.claude?.allowedTools;
-    const allowedTools = hasOutputContracts && step.edit !== true
-      ? resolvedAllowedTools?.filter((t) => t !== 'Write')
-      : resolvedAllowedTools;
+    assertProviderResolvedForCapabilitySensitiveOptions(resolvedProvider, {
+      stepName: step.name,
+      usesStructuredOutput: step.structuredOutput !== undefined,
+      usesMcpServers: step.mcpServers !== undefined && Object.keys(step.mcpServers).length > 0,
+      usesClaudeAllowedTools,
+      usesAllowedTools: usesTeamLeaderPartAllowedTools ? 'team_leader.part_allowed_tools' : undefined,
+    });
+
+    const hasOutputContracts = step.outputContracts !== undefined && step.outputContracts.length > 0;
+    const allowedTools = runtime?.teamLeaderPart?.partAllowedTools
+      ?? resolveAllowedToolsForProvider(
+        mergedProviderOptions,
+        hasOutputContracts,
+        step.edit,
+      );
+    assertProviderSupportsAllowedTools(
+      resolvedProvider,
+      runtime?.teamLeaderPart?.partAllowedTools,
+      'team_leader.part_allowed_tools',
+    );
+    assertProviderSupportsClaudeAllowedTools(resolvedProvider, mergedProviderOptions);
+    assertProviderSupportsMcpServers(resolvedProvider, step.mcpServers);
 
     // Skip session resume when cwd !== projectCwd (worktree execution) to avoid cross-directory contamination
     const shouldResumeSession = step.session !== 'refresh' && this.getCwd() === this.getProjectCwd();
+
+    const supportsStructuredOutput = providerSupportsStructuredOutput(resolvedProvider);
 
     return {
       ...this.buildBaseOptions(step, mergedProviderOptions, runtime),
       sessionId: shouldResumeSession ? this.getSessionId(buildSessionKey(step, runtime?.providerInfo?.provider)) : undefined,
       allowedTools,
       mcpServers: step.mcpServers,
+      outputSchema: supportsStructuredOutput === false ? undefined : step.structuredOutput?.schema,
     };
   }
 

@@ -17,6 +17,90 @@ export interface WorkflowRule {
   aggregateConditionText?: string | string[];
 }
 
+export interface WorkflowStructuredOutput {
+  schemaRef: string;
+  schema: Record<string, unknown>;
+}
+
+interface WorkflowSystemBinding {
+  as: string;
+}
+
+export type WorkflowSystemInput =
+  | (WorkflowSystemBinding & {
+    type: 'task_context';
+    source: 'current_task';
+  })
+  | (WorkflowSystemBinding & {
+    type: 'branch_context';
+    source: 'current_task';
+  })
+  | (WorkflowSystemBinding & {
+    type: 'pr_context';
+    source: 'current_branch';
+  })
+  | (WorkflowSystemBinding & {
+    type: 'issue_context';
+    source: 'current_task';
+  })
+  | (WorkflowSystemBinding & {
+    type: 'task_queue_context';
+    source: 'current_project';
+  });
+
+export interface WorkflowEnqueueIssueConfig {
+  create?: boolean;
+  labels?: string[];
+}
+
+export interface WorkflowEnqueueWorktreeConfig {
+  enabled?: boolean;
+  auto_pr?: boolean;
+  draft_pr?: boolean;
+}
+
+type WorkflowContextTemplateReference = `{context:${string}}`;
+type WorkflowStructuredTemplateReference = `{structured:${string}}`;
+type WorkflowEffectTemplateReference = `{effect:${string}}`;
+
+// The parser/schema enforce the exact DSL shape. Keep the public type broad enough
+// that valid nested template paths are not rejected at compile time.
+export type WorkflowTemplateReference =
+  | WorkflowContextTemplateReference
+  | WorkflowStructuredTemplateReference
+  | WorkflowEffectTemplateReference;
+
+export type WorkflowEffectScalarReference = WorkflowTemplateReference | number;
+
+export type WorkflowEffect =
+  | {
+    type: 'enqueue_task';
+    mode: 'new' | 'from_pr';
+    workflow: string;
+    task: string;
+    pr?: WorkflowEffectScalarReference;
+    issue?: WorkflowEnqueueIssueConfig | WorkflowTemplateReference;
+    base_branch?: string;
+    worktree?: WorkflowEnqueueWorktreeConfig;
+  }
+  | {
+    type: 'comment_pr';
+    pr: WorkflowEffectScalarReference;
+    body: string;
+  }
+  | {
+    type: 'sync_with_root';
+    pr: WorkflowEffectScalarReference;
+  }
+  | {
+    type: 'resolve_conflicts_with_ai';
+    pr: WorkflowEffectScalarReference;
+  }
+  | {
+    type: 'merge_pr';
+    pr: WorkflowEffectScalarReference;
+  };
+
 export interface OutputContractItem {
   name: string;
   format: string;
@@ -92,6 +176,7 @@ export interface StepProviderOptions {
 export interface WorkflowStep {
   name: string;
   description?: string;
+  mode?: 'agent' | 'system';
   persona?: string;
   session?: 'continue' | 'refresh';
   personaDisplayName: string;
@@ -103,6 +188,10 @@ export interface WorkflowStep {
   providerOptions?: StepProviderOptions;
   edit?: boolean;
   instruction: string;
+  delayBeforeMs?: number;
+  structuredOutput?: WorkflowStructuredOutput;
+  systemInputs?: WorkflowSystemInput[];
+  effects?: WorkflowEffect[];
   rules?: WorkflowRule[];
   outputContracts?: OutputContractEntry[];
   qualityGates?: string[];
@@ -163,6 +252,7 @@ export interface LoopMonitorConfig {
 export interface WorkflowConfig {
   name: string;
   description?: string;
+  schemas?: Record<string, string>;
   providerOptions?: StepProviderOptions;
   runtime?: WorkflowRuntimeConfig;
   personas?: Record<string, string>;
@@ -183,6 +273,9 @@ export interface WorkflowState {
   currentStep: string;
   iteration: number;
   stepOutputs: Map<string, AgentResponse>;
+  structuredOutputs: Map<string, Record<string, unknown>>;
+  systemContexts: Map<string, Record<string, unknown>>;
+  effectResults: Map<string, Record<string, unknown>>;
   lastOutput?: AgentResponse;
   previousResponseSourcePath?: string;
   userInputs: string[];

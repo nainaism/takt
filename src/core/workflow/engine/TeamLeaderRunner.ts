@@ -94,6 +94,8 @@ export class TeamLeaderRunner {
       personaPath: leaderStep.personaPath,
       model: leaderModel,
       provider: leaderProvider,
+      resolvedModel: leaderModel,
+      resolvedProvider: leaderProvider,
       onStream: this.deps.engineOptions.onStream,
       onPromptResolved: (promptParts) => {
         this.deps.onPhaseStart?.(leaderStep, 1, 'execute', promptParts.userInstruction, promptParts, undefined, parentIteration);
@@ -195,6 +197,8 @@ export class TeamLeaderRunner {
             language: this.deps.engineOptions.language,
             model: leaderModel,
             provider: leaderProvider,
+            resolvedModel: leaderModel,
+            resolvedProvider: leaderProvider,
             onStream: this.deps.engineOptions.onStream,
           },
         );
@@ -261,16 +265,30 @@ export class TeamLeaderRunner {
     parallelLogger: ParallelLogger | undefined,
   ): Promise<PartResult> {
     const partStep = createPartStep(step, part);
-    const baseOptions = this.deps.optionsBuilder.buildAgentOptions(partStep);
+    const partProviderInfo = this.deps.optionsBuilder.resolveStepProviderModel(partStep);
+    const partAllowedTools = step.teamLeader?.partAllowedTools;
+    const baseOptions = this.deps.optionsBuilder.buildAgentOptions(partStep, {
+      providerInfo: partProviderInfo,
+      teamLeaderPart: {
+        partAllowedTools,
+      },
+    });
     const timeoutMs = defaultTimeoutMs;
     const { signal, dispose } = buildAbortSignal(timeoutMs, baseOptions.abortSignal);
     const options = parallelLogger
-      ? { ...baseOptions, abortSignal: signal, onStream: parallelLogger.createStreamHandler(part.id, partIndex) }
-      : { ...baseOptions, abortSignal: signal };
+      ? {
+        ...baseOptions,
+        abortSignal: signal,
+        onStream: parallelLogger.createStreamHandler(part.id, partIndex),
+      }
+      : {
+        ...baseOptions,
+        abortSignal: signal,
+      };
 
     try {
       const response = await executeAgent(partStep.persona, part.instruction, options);
-      updatePersonaSession(buildSessionKey(partStep), response.sessionId);
+      updatePersonaSession(buildSessionKey(partStep, partProviderInfo.provider), response.sessionId);
       return {
         part,
         response: {
@@ -298,5 +316,4 @@ export class TeamLeaderRunner {
     };
     return { part, response: errorResponse };
   }
-
 }

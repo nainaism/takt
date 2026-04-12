@@ -4,17 +4,26 @@
 
 import type { WorkflowStep, OutputContractEntry } from '../../models/types.js';
 
+const DETERMINISTIC_CONDITION_PATTERN = /^(true|false|(?:context|structured|effect)\..*|.*(?:==|!=|>=|<=|>|<).*)$/;
+
+export function isDeterministicCondition(condition: string): boolean {
+  return DETERMINISTIC_CONDITION_PATTERN.test(condition.trim());
+}
+
+export function isDeferredDeterministicCondition(condition: string): boolean {
+  return condition.trim() === 'true';
+}
+
 /**
  * Check whether a step has tag-based rules (i.e., rules that require
  * [STEP:N] tag output for detection).
  *
- * Returns false when all rules are ai() or aggregate conditions,
- * meaning no tag-based status output is needed.
+ * Returns false when every rule can be resolved deterministically
+ * or via explicit AI/aggregate handling without tag output.
  */
 export function hasTagBasedRules(step: WorkflowStep): boolean {
   if (!step.rules || step.rules.length === 0) return false;
-  const allNonTagConditions = step.rules.every((r) => r.isAiCondition || r.isAggregateCondition);
-  return !allNonTagConditions;
+  return step.rules.some((rule) => !rule.isAiCondition && !rule.isAggregateCondition && !isDeterministicCondition(rule.condition));
 }
 
 /**
