@@ -4,7 +4,6 @@ import type { StepProviderOptions } from '../../../core/models/workflow-types.js
 import { resolveStepProviderModel } from '../../../core/workflow/provider-resolution.js';
 import {
   assertProviderResolvedForCapabilitySensitiveOptions,
-  assertProviderSupportsClaudeAllowedTools,
   resolveAllowedToolsForProvider,
 } from '../../../core/workflow/engine/engine-provider-options.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
@@ -103,20 +102,17 @@ function resolvePreviewAllowedTools(
     model: resolution.model,
     personaProviders: resolution.personaProviders,
   }).provider;
-  const usesClaudeAllowedTools = (mergedProviderOptions?.claude?.allowedTools?.length ?? 0) > 0;
 
   assertProviderResolvedForCapabilitySensitiveOptions(resolvedProvider, {
     stepName: step.name,
     usesStructuredOutput: false,
-    usesMcpServers: false,
-    usesClaudeAllowedTools,
   });
-  assertProviderSupportsClaudeAllowedTools(resolvedProvider, mergedProviderOptions);
 
   return resolveAllowedToolsForProvider(
     mergedProviderOptions,
     step.outputContracts !== undefined && step.outputContracts.length > 0,
     step.edit,
+    resolvedProvider,
   ) ?? [];
 }
 

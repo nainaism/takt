@@ -168,7 +168,7 @@ describe('WorkflowEngine provider_options resolution', () => {
     expect(options?.allowedTools).toEqual(['Read', 'Edit', 'Bash']);
   });
 
-  it('should fail fast when claude allowedTools are configured for a non-claude provider', async () => {
+  it('should silently ignore claude allowedTools when configured for a non-claude provider', async () => {
     const step = makeStep('implement', {
       provider: 'codex',
       providerOptions: {
@@ -194,13 +194,13 @@ describe('WorkflowEngine provider_options resolution', () => {
       provider: 'claude',
     });
 
-    const state = await engine.run();
+    await engine.run();
 
-    expect(state.status).toBe('aborted');
-    expect(vi.mocked(runAgent)).not.toHaveBeenCalled();
+    const options = vi.mocked(runAgent).mock.calls[0]?.[2];
+    expect(options?.allowedTools).toBeUndefined();
   });
 
-  it('should fail fast when claude allowedTools are configured on a step resolved to opencode via personaProviders', async () => {
+  it('should silently ignore claude allowedTools on a step resolved to opencode via personaProviders', async () => {
     const step = makeStep('implement', {
       personaDisplayName: 'coder',
       providerOptions: {
@@ -232,10 +232,10 @@ describe('WorkflowEngine provider_options resolution', () => {
       },
     });
 
-    const state = await engine.run();
+    await engine.run();
 
-    expect(state.status).toBe('aborted');
-    expect(vi.mocked(runAgent)).not.toHaveBeenCalled();
+    const options = vi.mocked(runAgent).mock.calls[0]?.[2];
+    expect(options?.allowedTools).toBeUndefined();
   });
 
   it('should keep claude allowedTools when the provider is mock', async () => {

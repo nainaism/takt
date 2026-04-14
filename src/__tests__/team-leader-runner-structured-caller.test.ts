@@ -398,7 +398,7 @@ describe('TeamLeaderRunner with structuredCaller', () => {
     expect(updatePersonaSession).toHaveBeenCalledWith('coder:opencode', 'session-opencode-1');
   });
 
-  it('non-Claude part execution では partAllowedTools 設定を fail-fast 契約へ委譲する', async () => {
+  it('non-Claude part execution でも partAllowedTools をそのまま runtime に渡す（プロバイダ層で log & ignore される）', async () => {
     mockExecuteAgent.mockResolvedValue({
       persona: 'coder',
       status: 'done',
@@ -427,9 +427,11 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       }),
     };
 
-    const buildAgentOptions = vi.fn().mockImplementation(() => {
-      throw new Error('team_leader.part_allowed_tools is not supported for provider "cursor"');
-    });
+    const buildAgentOptions = vi.fn().mockImplementation((_step: WorkflowStep, runtime) => ({
+      cwd: '/tmp/project',
+      allowedTools: runtime?.teamLeaderPart?.partAllowedTools,
+      providerOptions: undefined,
+    }));
 
     const runner = new TeamLeaderRunner({
       optionsBuilder: {
@@ -487,140 +489,24 @@ describe('TeamLeaderRunner with structuredCaller', () => {
       status: 'running',
     };
 
-    await expect(runner.runTeamLeaderStep(
+    await runner.runTeamLeaderStep(
       step,
       state,
       'implement feature',
       5,
       vi.fn(),
-    )).rejects.toThrow(/team_leader\.part_allowed_tools.*cursor/i);
+    );
 
     expect(buildAgentOptions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'implement.part-1',
-      }),
+      expect.objectContaining({ name: 'implement.part-1' }),
       {
-        providerInfo: {
-          provider: 'cursor',
-          model: 'cursor-fast',
-        },
-        teamLeaderPart: {
-          partAllowedTools: ['Read', 'Edit'],
-        },
+        providerInfo: { provider: 'cursor', model: 'cursor-fast' },
+        teamLeaderPart: { partAllowedTools: ['Read', 'Edit'] },
       },
     );
-    expect(mockExecuteAgent).not.toHaveBeenCalled();
-  });
-
-  it('provider 未解決のまま part_allowed_tools を使うと fail-fast し、part 実行に進まない', async () => {
-    mockExecuteAgent.mockResolvedValue({
-      persona: 'coder',
-      status: 'done',
-      content: 'API done',
-      timestamp: new Date('2026-04-01T00:00:00.000Z'),
-    });
-    const resolveStepProviderModel = vi
-      .fn()
-      .mockReturnValueOnce({ provider: 'claude', model: 'sonnet' })
-      .mockReturnValueOnce({ provider: undefined, model: undefined });
-
-    const structuredCaller = {
-      decomposeTask: vi.fn().mockImplementation(async (_instruction, _maxParts, options) => {
-        options.onPromptResolved?.({
-          systemPrompt: 'team-leader-system',
-          userInstruction: 'leader instruction',
-        });
-        return [
-          { id: 'part-1', title: 'API', instruction: 'Implement API' },
-        ];
-      }),
-      requestMoreParts: vi.fn().mockResolvedValue({
-        done: true,
-        reasoning: 'enough',
-        parts: [],
-      }),
-    };
-
-    const buildAgentOptions = vi.fn().mockImplementation(() => {
-      throw new Error('Step "implement.part-1" uses team_leader.part_allowed_tools but provider is not resolved');
-    });
-
-    const runner = new TeamLeaderRunner({
-      optionsBuilder: {
-        buildAgentOptions,
-        resolveStepProviderModel,
-      },
-      stepExecutor: {
-        buildInstruction: vi.fn().mockReturnValue('leader instruction'),
-        applyPostExecutionPhases: vi.fn(async (_step, _state, _iteration, response) => response),
-        persistPreviousResponseSnapshot: vi.fn(),
-        emitStepReports: vi.fn(),
-      },
-      engineOptions: {
-        projectCwd: '/tmp/project',
-        structuredCaller,
-      },
-      getCwd: () => '/tmp/project',
-      getInteractive: () => false,
-    } as ConstructorParameters<typeof TeamLeaderRunner>[0] & {
-      engineOptions: { projectCwd: string; structuredCaller: typeof structuredCaller };
-    });
-
-    const step: WorkflowStep = {
-      name: 'implement',
-      persona: 'coder',
-      personaDisplayName: 'coder',
-      instruction: 'Task: {task}',
-      passPreviousResponse: true,
-      teamLeader: {
-        persona: 'team-leader',
-        maxParts: 2,
-        refillThreshold: 0,
-        timeoutMs: 1000,
-        partPersona: 'coder',
-        partAllowedTools: ['Read', 'Edit'],
-      },
-      rules: [{ condition: 'done', next: 'COMPLETE' }],
-    };
-
-    const state: WorkflowState = {
-      workflowName: 'workflow',
-      currentStep: 'implement',
-      iteration: 1,
-      stepOutputs: new Map(),
-      structuredOutputs: new Map(),
-      systemContexts: new Map(),
-      effectResults: new Map(),
-      lastOutput: undefined,
-      previousResponseSourcePath: undefined,
-      userInputs: [],
-      personaSessions: new Map(),
-      stepIterations: new Map(),
-      status: 'running',
-    };
-
-    await expect(runner.runTeamLeaderStep(
-      step,
-      state,
-      'implement feature',
-      5,
-      vi.fn(),
-    )).rejects.toThrow(/team_leader\.part_allowed_tools.*provider is not resolved/i);
-
-    expect(buildAgentOptions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'implement.part-1',
-      }),
-      {
-        providerInfo: {
-          provider: undefined,
-          model: undefined,
-        },
-        teamLeaderPart: {
-          partAllowedTools: ['Read', 'Edit'],
-        },
-      },
-    );
-    expect(mockExecuteAgent).not.toHaveBeenCalled();
+    const [, , executedOptions] = mockExecuteAgent.mock.calls[0] ?? [];
+    expect(executedOptions).toEqual(expect.objectContaining({
+      allowedTools: ['Read', 'Edit'],
+    }));
   });
 });

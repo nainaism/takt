@@ -355,7 +355,7 @@ describe('OptionsBuilder.buildAgentOptions', () => {
     expect(options.allowedTools).toEqual(['Read', 'Bash']);
   });
 
-  it('fails fast when claude allowedTools are configured for a non-claude provider', () => {
+  it('silently drops claude allowedTools when configured for a non-claude provider', () => {
     const step = createStep({
       provider: 'codex',
       providerOptions: {
@@ -366,9 +366,9 @@ describe('OptionsBuilder.buildAgentOptions', () => {
       provider: 'claude',
     });
 
-    expect(() => builder.buildAgentOptions(step)).toThrow(
-      /provider_options\.claude\.allowed_tools.*codex/i,
-    );
+    const options = builder.buildAgentOptions(step);
+
+    expect(options.allowedTools).toBeUndefined();
   });
 
   it('keeps claude allowedTools when the provider is mock', () => {
@@ -385,7 +385,7 @@ describe('OptionsBuilder.buildAgentOptions', () => {
     expect(builder.buildAgentOptions(step).allowedTools).toEqual(['Read', 'Edit']);
   });
 
-  it('fails fast when mcpServers are configured for a provider without MCP support', () => {
+  it('drops mcpServers silently for providers without MCP support', () => {
     const step = createStep({
       provider: 'cursor',
       mcpServers: {
@@ -399,7 +399,9 @@ describe('OptionsBuilder.buildAgentOptions', () => {
       provider: 'cursor',
     });
 
-    expect(() => builder.buildAgentOptions(step)).toThrow(/mcp_servers|mcpServers/i);
+    const options = builder.buildAgentOptions(step);
+
+    expect(options.mcpServers).toBeUndefined();
   });
 
   it('keeps mcpServers when provider supports MCP', () => {
@@ -426,7 +428,7 @@ describe('OptionsBuilder.buildAgentOptions', () => {
     });
   });
 
-  it('fails fast when capability-dependent options are used without a resolved provider', () => {
+  it('fails fast when structured_output is used without a resolved provider', () => {
     const step = createStep({
       structuredOutput: {
         schema: {
@@ -438,49 +440,22 @@ describe('OptionsBuilder.buildAgentOptions', () => {
           additionalProperties: false,
         },
       },
-      mcpServers: {
-        docs: {
-          type: 'stdio',
-          command: 'docs-mcp',
-        },
-      },
-      providerOptions: {
-        claude: { allowedTools: ['Read', 'Edit'] },
-      },
     });
     const builder = createBuilder(step, { provider: undefined });
 
     expect(() => builder.buildAgentOptions(step)).toThrow(
-      /structured_output.*mcp_servers.*provider_options\.claude\.allowed_tools.*provider is not resolved/i,
+      /structured_output.*provider is not resolved/i,
     );
   });
 
-  it('fails fast when team leader part_allowed_tools are used without a resolved provider', () => {
-    const step = createStep();
-    const builder = createBuilder(step, {
-      provider: undefined,
-      model: undefined,
-    });
-
-    expect(() => builder.buildAgentOptions(step, {
-      providerInfo: {
-        provider: undefined,
-        model: undefined,
-      },
-      teamLeaderPart: {
-        partAllowedTools: ['Read', 'Edit'],
-      },
-    })).toThrow(/team_leader\.part_allowed_tools.*provider is not resolved/i);
-  });
-
-  it('fails fast when team leader part_allowed_tools are used with an unsupported provider', () => {
+  it('drops team leader part_allowed_tools silently for providers without tool-allowlist support', () => {
     const step = createStep();
     const builder = createBuilder(step, {
       provider: 'cursor',
       model: 'cursor-fast',
     });
 
-    expect(() => builder.buildAgentOptions(step, {
+    const options = builder.buildAgentOptions(step, {
       providerInfo: {
         provider: 'cursor',
         model: 'cursor-fast',
@@ -488,7 +463,9 @@ describe('OptionsBuilder.buildAgentOptions', () => {
       teamLeaderPart: {
         partAllowedTools: ['Read', 'Edit'],
       },
-    })).toThrow(/team_leader\.part_allowed_tools.*cursor/i);
+    });
+
+    expect(options.allowedTools).toBeUndefined();
   });
 
   it('uses already resolved provider and model for capability checks', () => {

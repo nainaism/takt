@@ -10,10 +10,9 @@ import {
 } from '../../../infra/config/providerOptions.js';
 import {
   assertProviderResolvedForCapabilitySensitiveOptions,
-  assertProviderSupportsAllowedTools,
-  assertProviderSupportsClaudeAllowedTools,
-  assertProviderSupportsMcpServers,
   resolveAllowedToolsForProvider,
+  resolveMcpServersForProvider,
+  resolvePartAllowedToolsForProvider,
 } from './engine-provider-options.js';
 import { providerSupportsStructuredOutput } from '../../../infra/providers/provider-capabilities.js';
 import type {
@@ -131,31 +130,24 @@ export class OptionsBuilder {
   buildAgentOptions(step: WorkflowStep, runtime?: RuntimeStepResolution): RunAgentOptions {
     const mergedProviderOptions = this.resolveMergedProviderOptions(step, runtime);
     const { provider: resolvedProvider } = this.resolveStepProviderModel(step, runtime);
-    const usesClaudeAllowedTools = (mergedProviderOptions?.claude?.allowedTools?.length ?? 0) > 0;
-    const usesTeamLeaderPartAllowedTools = (runtime?.teamLeaderPart?.partAllowedTools?.length ?? 0) > 0;
 
     assertProviderResolvedForCapabilitySensitiveOptions(resolvedProvider, {
       stepName: step.name,
       usesStructuredOutput: step.structuredOutput !== undefined,
-      usesMcpServers: step.mcpServers !== undefined && Object.keys(step.mcpServers).length > 0,
-      usesClaudeAllowedTools,
-      usesAllowedTools: usesTeamLeaderPartAllowedTools ? 'team_leader.part_allowed_tools' : undefined,
     });
 
     const hasOutputContracts = step.outputContracts !== undefined && step.outputContracts.length > 0;
-    const allowedTools = runtime?.teamLeaderPart?.partAllowedTools
+    const resolvedPartAllowedTools = resolvePartAllowedToolsForProvider(
+      runtime?.teamLeaderPart?.partAllowedTools,
+      resolvedProvider,
+    );
+    const allowedTools = resolvedPartAllowedTools
       ?? resolveAllowedToolsForProvider(
         mergedProviderOptions,
         hasOutputContracts,
         step.edit,
+        resolvedProvider,
       );
-    assertProviderSupportsAllowedTools(
-      resolvedProvider,
-      runtime?.teamLeaderPart?.partAllowedTools,
-      'team_leader.part_allowed_tools',
-    );
-    assertProviderSupportsClaudeAllowedTools(resolvedProvider, mergedProviderOptions);
-    assertProviderSupportsMcpServers(resolvedProvider, step.mcpServers);
 
     // Skip session resume when cwd !== projectCwd (worktree execution) to avoid cross-directory contamination
     const shouldResumeSession = step.session !== 'refresh' && this.getCwd() === this.getProjectCwd();
@@ -166,7 +158,7 @@ export class OptionsBuilder {
       ...this.buildBaseOptions(step, mergedProviderOptions, runtime),
       sessionId: shouldResumeSession ? this.getSessionId(buildSessionKey(step, runtime?.providerInfo?.provider)) : undefined,
       allowedTools,
-      mcpServers: step.mcpServers,
+      mcpServers: resolveMcpServersForProvider(step.mcpServers, resolvedProvider),
       outputSchema: supportsStructuredOutput === false ? undefined : step.structuredOutput?.schema,
     };
   }

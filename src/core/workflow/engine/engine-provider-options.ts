@@ -9,22 +9,52 @@ import {
 interface CapabilitySensitiveStepOptions {
   stepName: string;
   usesStructuredOutput: boolean;
-  usesMcpServers: boolean;
-  usesClaudeAllowedTools: boolean;
-  usesAllowedTools?: string;
+}
+
+type CapabilityProbe = (provider: ProviderType | undefined) => boolean | undefined;
+
+// Silent-drop: workflows may carry options for providers they aren't currently
+// running under. Keep the value only when capability is confirmed true.
+function keepWhenProviderSupports<T>(
+  value: T | undefined,
+  provider: ProviderType | undefined,
+  probe: CapabilityProbe,
+): T | undefined {
+  return probe(provider) === true ? value : undefined;
 }
 
 export function resolveAllowedToolsForProvider(
   providerOptions: StepProviderOptions | undefined,
   hasOutputContracts: boolean,
   edit: boolean | undefined,
+  provider: ProviderType | undefined,
 ): string[] | undefined {
-  const allowedTools = providerOptions?.claude?.allowedTools;
+  const allowedTools = keepWhenProviderSupports(
+    providerOptions?.claude?.allowedTools,
+    provider,
+    providerSupportsClaudeAllowedTools,
+  );
+  if (!allowedTools) {
+    return undefined;
+  }
   if (!hasOutputContracts || edit === true) {
     return allowedTools;
   }
+  return allowedTools.filter((tool) => tool !== 'Write');
+}
 
-  return allowedTools?.filter((tool) => tool !== 'Write');
+export function resolveMcpServersForProvider(
+  mcpServers: Record<string, McpServerConfig> | undefined,
+  provider: ProviderType | undefined,
+): Record<string, McpServerConfig> | undefined {
+  return keepWhenProviderSupports(mcpServers, provider, providerSupportsMcpServers);
+}
+
+export function resolvePartAllowedToolsForProvider(
+  partAllowedTools: string[] | undefined,
+  provider: ProviderType | undefined,
+): string[] | undefined {
+  return keepWhenProviderSupports(partAllowedTools, provider, providerSupportsAllowedTools);
 }
 
 export function assertProviderResolvedForCapabilitySensitiveOptions(
@@ -35,71 +65,11 @@ export function assertProviderResolvedForCapabilitySensitiveOptions(
     return;
   }
 
-  const enabledFeatures: string[] = [];
-  if (options.usesStructuredOutput) {
-    enabledFeatures.push('structured_output');
-  }
-  if (options.usesMcpServers) {
-    enabledFeatures.push('mcp_servers');
-  }
-  if (options.usesClaudeAllowedTools) {
-    enabledFeatures.push('provider_options.claude.allowed_tools');
-  }
-  if (options.usesAllowedTools) {
-    enabledFeatures.push(options.usesAllowedTools);
-  }
-  if (enabledFeatures.length === 0) {
+  if (!options.usesStructuredOutput) {
     return;
   }
 
   throw new Error(
-    `Step "${options.stepName}" uses ${enabledFeatures.join(', ')} but provider is not resolved`,
+    `Step "${options.stepName}" uses structured_output but provider is not resolved`,
   );
-}
-
-export function assertProviderSupportsClaudeAllowedTools(
-  provider: ProviderType | undefined,
-  providerOptions: StepProviderOptions | undefined,
-): void {
-  const allowedTools = providerOptions?.claude?.allowedTools;
-  if (!allowedTools || allowedTools.length === 0) {
-    return;
-  }
-
-  if (provider !== undefined && providerSupportsClaudeAllowedTools(provider) === false) {
-    throw new Error(
-      `provider_options.claude.allowed_tools is not supported for provider "${provider}"`,
-    );
-  }
-}
-
-export function assertProviderSupportsAllowedTools(
-  provider: ProviderType | undefined,
-  allowedTools: string[] | undefined,
-  optionName = 'allowed_tools',
-): void {
-  if (!allowedTools || allowedTools.length === 0) {
-    return;
-  }
-
-  if (provider !== undefined && providerSupportsAllowedTools(provider) === false) {
-    throw new Error(
-      `${optionName} is not supported for provider "${provider}"`,
-    );
-  }
-}
-
-export function assertProviderSupportsMcpServers(
-  provider: ProviderType | undefined,
-  mcpServers: Record<string, McpServerConfig> | undefined,
-): void {
-  if (!mcpServers || Object.keys(mcpServers).length === 0) {
-    return;
-  }
-
-  if (provider !== undefined && providerSupportsMcpServers(provider) === false) {
-    throw new Error(
-      `mcp_servers is not supported for provider "${provider ?? 'unknown'}"`,
-    );
-  }
 }

@@ -310,7 +310,7 @@ steps:
     expect(result.stepPreviews[0]?.allowedTools).toEqual(['Read', 'Bash']);
   });
 
-  it('should fail fast when preview tools are configured for a non-Claude provider', () => {
+  it('should silently drop preview tools when configured for a non-Claude provider', () => {
     const workflowYaml = `name: preview-invalid-tools
 initial_step: plan
 max_steps: 1
@@ -330,8 +330,9 @@ steps:
     const workflowPath = join(tempDir, 'preview-invalid-tools.yaml');
     writeFileSync(workflowPath, workflowYaml);
 
-    expect(() => getWorkflowSummary(workflowPath, tempDir, 1))
-      .toThrow('provider_options.claude.allowed_tools is not supported for provider "cursor"');
+    const result = getWorkflowSummary(workflowPath, tempDir, 1);
+
+    expect(result.stepPreviews[0]?.allowedTools).toEqual([]);
   });
 
   it('should return empty previews when previewCount is 0', () => {

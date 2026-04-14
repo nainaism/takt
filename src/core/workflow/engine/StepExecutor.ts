@@ -173,8 +173,6 @@ export class StepExecutor {
     assertProviderResolvedForCapabilitySensitiveOptions(provider, {
       stepName: step.name,
       usesStructuredOutput: step.structuredOutput !== undefined,
-      usesMcpServers: false,
-      usesClaudeAllowedTools: false,
     });
     const supportsStructuredOutput = providerSupportsStructuredOutput(provider);
     if (!step.structuredOutput || supportsStructuredOutput !== false) {
@@ -205,8 +203,6 @@ export class StepExecutor {
     assertProviderResolvedForCapabilitySensitiveOptions(provider, {
       stepName: step.name,
       usesStructuredOutput: true,
-      usesMcpServers: false,
-      usesClaudeAllowedTools: false,
     });
 
     try {
