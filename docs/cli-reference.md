@@ -145,7 +145,14 @@ Execute all pending tasks from `.takt/tasks.yaml`.
 ```bash
 # Execute all pending tasks in .takt/tasks.yaml
 takt run
+
+# Ignore max_steps exceed and continue execution
+takt run --ignore-exceed
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--ignore-exceed` | Ignore workflow `max_steps` exceed and continue execution. Other stop conditions (loop_detected, blocked, step_error, runtime_error, SIGINT) are preserved. |
 
 ### takt watch
 

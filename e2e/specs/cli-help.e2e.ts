@@ -52,6 +52,21 @@ describe('E2E: Help command (takt --help)', () => {
     expect(output).toMatch(/run|task|pending/);
   });
 
+  it('should show --ignore-exceed option in takt run --help', () => {
+    // Given: a local repo with isolated env
+
+    // When: running takt run --help
+    const result = runTakt({
+      args: ['run', '--help'],
+      cwd: repo.path,
+      env: isolatedEnv.env,
+    });
+
+    // Then: output includes --ignore-exceed option
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('--ignore-exceed');
+  });
+
   it('should show prompt argument help without current-workflow wording', () => {
     // Given: a local repo with isolated env
 

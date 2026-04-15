@@ -103,6 +103,14 @@ tasks:
 takt run
 ```
 
+workflow の `max_steps` 上限を超えても実行を継続したい場合は `--ignore-exceed` を使用します。
+
+```bash
+takt run --ignore-exceed
+```
+
+`--ignore-exceed` を指定すると、`max_steps` の反復制限チェックがスキップされ、ステップ数に関係なくタスクを最後まで実行できます。他の停止条件（loop_detected、blocked、step_error、runtime_error、SIGINT）は維持されます。
+
 `run` コマンドは pending タスクを取得して、設定された workflow を通じて実行します。各タスクは次の処理を経ます。
 
 1. クローン作成（`worktree` が設定されている場合）

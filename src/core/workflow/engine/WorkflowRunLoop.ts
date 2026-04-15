@@ -75,24 +75,26 @@ export async function runWorkflowToCompletion(deps: WorkflowRunLoopDeps): Promis
       break;
     }
 
-    const maxSteps = deps.getMaxSteps();
-    if (deps.state.iteration >= maxSteps) {
-      deps.emit('iteration:limit', deps.state.iteration, maxSteps);
+    if (!deps.options.ignoreIterationLimit) {
+      const maxSteps = deps.getMaxSteps();
+      if (deps.state.iteration >= maxSteps) {
+        deps.emit('iteration:limit', deps.state.iteration, maxSteps);
 
-      if (deps.options.onIterationLimit) {
-        const additionalIterations = await deps.options.onIterationLimit({
-          currentIteration: deps.state.iteration,
-          maxSteps,
-          currentStep: deps.state.currentStep,
-        });
-        if (additionalIterations !== null && additionalIterations > 0) {
-          deps.updateMaxSteps(maxSteps + additionalIterations);
-          continue;
+        if (deps.options.onIterationLimit) {
+          const additionalIterations = await deps.options.onIterationLimit({
+            currentIteration: deps.state.iteration,
+            maxSteps,
+            currentStep: deps.state.currentStep,
+          });
+          if (additionalIterations !== null && additionalIterations > 0) {
+            deps.updateMaxSteps(maxSteps + additionalIterations);
+            continue;
+          }
         }
-      }
 
-      abort = abortWorkflow(deps, 'iteration_limit', ERROR_MESSAGES.MAX_STEPS_REACHED);
-      break;
+        abort = abortWorkflow(deps, 'iteration_limit', ERROR_MESSAGES.MAX_STEPS_REACHED);
+        break;
+      }
     }
 
     const step = deps.getStep(deps.state.currentStep);

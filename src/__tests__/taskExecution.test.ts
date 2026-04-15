@@ -206,6 +206,57 @@ describe('executeAndCompleteTask', () => {
     });
   });
 
+  it('should pass ignoreExceed from task execution options to executeWorkflow via executeAndCompleteTask', async () => {
+    const task = createTask('task-with-ignore-exceed');
+
+    await executeAndCompleteTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+      { ignoreExceed: true },
+    );
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflow.mock.calls[0]?.[3] as {
+      ignoreExceed?: boolean;
+    };
+    expect(workflowExecutionOptions?.ignoreExceed).toBe(true);
+  });
+
+  it('should not pass ignoreExceed to executeWorkflow when not provided in task execution options', async () => {
+    const task = createTask('task-without-ignore-exceed');
+
+    await executeAndCompleteTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+    );
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflow.mock.calls[0]?.[3] as {
+      ignoreExceed?: boolean;
+    };
+    expect(workflowExecutionOptions?.ignoreExceed).toBeUndefined();
+  });
+
+  it('should pass ignoreExceed to executeWorkflow when provided via executeTask', async () => {
+    const task = createTask('task-via-executeTask');
+
+    await executeTask({
+      task: task.content,
+      cwd: '/project',
+      projectCwd: '/project',
+      workflowIdentifier: 'default',
+      ignoreExceed: true,
+    });
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflow.mock.calls[0]?.[3] as {
+      ignoreExceed?: boolean;
+    };
+    expect(workflowExecutionOptions?.ignoreExceed).toBe(true);
+  });
+
   it('should not pass config provider/model to executeWorkflow when agent overrides are absent', async () => {
     const task = createTask('task-with-defaults');
 

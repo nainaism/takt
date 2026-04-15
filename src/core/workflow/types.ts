@@ -279,6 +279,8 @@ export interface WorkflowEngineOptions {
   taskColorIndex?: number;
   /** Initial iteration count (for resuming exceeded tasks) */
   initialIteration?: number;
+  /** When true, skip the max_steps iteration limit check (continue past maxSteps) */
+  ignoreIterationLimit?: boolean;
   /** Override workflow maxSteps for the current engine instance. */
   maxStepsOverride?: number;
   /** Current task metadata for system-step context resolution */

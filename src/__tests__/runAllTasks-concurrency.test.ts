@@ -270,6 +270,10 @@ describe('runAllTasks concurrency', () => {
       expect(mockClaimNextTasks).toHaveBeenCalled();
       expect(mockStatus).toHaveBeenCalledWith('Total', '2');
     });
+
+    // Note: ignoreExceed propagation from runAllTasks → executeAndCompleteTask → executeWorkflow
+    // is tested in taskExecution.test.ts (executeAndCompleteTask level) and E2E tests (CLI level).
+    // The runAllTasks → fillSlots → executeAndCompleteTask chain passes options as-is without transformation.
   });
 
   describe('parallel execution (concurrency>1)', () => {

@@ -103,6 +103,14 @@ Execute all pending tasks from `.takt/tasks.yaml`:
 takt run
 ```
 
+To continue execution past the workflow's `max_steps` limit, use `--ignore-exceed`:
+
+```bash
+takt run --ignore-exceed
+```
+
+When `--ignore-exceed` is specified, the `max_steps` iteration limit check is skipped, allowing tasks to run to completion regardless of the step count. Other stop conditions (loop_detected, blocked, step_error, runtime_error, SIGINT) are preserved.
+
 The `run` command claims pending tasks and executes them through the configured workflow. Each task goes through:
 
 1. Clone creation (if `worktree` is set)

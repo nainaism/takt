@@ -107,4 +107,58 @@ describe('E2E: Task status persistence in tasks.yaml (mock)', () => {
     expect(tasks.tasks[0]?.completed_at).toBeTruthy();
     expect(tasks.tasks[0]?.failure?.error).toBeTruthy();
   }, 240_000);
+
+  it('should complete task when --ignore-exceed is used with a maxSteps-exceeding workflow', () => {
+    // Given: a workflow with max_steps=1 but 2 steps (step-1 → step-2 → COMPLETE)
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-two-step-exceed.yaml');
+    const scenarioPath = resolve(__dirname, '../fixtures/scenarios/two-step-done.json');
+
+    writeSinglePendingTask(repo.path, workflowPath);
+
+    // When: running takt run with --ignore-exceed
+    const result = runTakt({
+      args: ['run', '--ignore-exceed', '--provider', 'mock'],
+      cwd: repo.path,
+      env: {
+        ...isolatedEnv.env,
+        TAKT_MOCK_SCENARIO: scenarioPath,
+      },
+      timeout: 240_000,
+    });
+
+    // Then: task completes successfully despite max_steps=1
+    expect(result.exitCode).toBe(0);
+
+    const tasksContent = readFileSync(join(repo.path, '.takt', 'tasks.yaml'), 'utf-8');
+    const tasks = parseYaml(tasksContent) as { tasks: Array<Record<string, unknown>> };
+    expect(tasks.tasks.length).toBe(1);
+    expect(tasks.tasks[0]?.status).toBe('completed');
+  }, 240_000);
+
+  it('should mark task as exceeded when running without --ignore-exceed against maxSteps-exceeding workflow', () => {
+    // Given: a workflow with max_steps=1 but 2 steps (step-1 → step-2 → COMPLETE)
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-two-step-exceed.yaml');
+    const scenarioPath = resolve(__dirname, '../fixtures/scenarios/two-step-done.json');
+
+    writeSinglePendingTask(repo.path, workflowPath);
+
+    // When: running takt run without --ignore-exceed
+    const result = runTakt({
+      args: ['run', '--provider', 'mock'],
+      cwd: repo.path,
+      env: {
+        ...isolatedEnv.env,
+        TAKT_MOCK_SCENARIO: scenarioPath,
+      },
+      timeout: 240_000,
+    });
+
+    // Then: task has exceeded status
+    expect(result.exitCode).toBe(0);
+
+    const tasksContent = readFileSync(join(repo.path, '.takt', 'tasks.yaml'), 'utf-8');
+    const tasks = parseYaml(tasksContent) as { tasks: Array<Record<string, unknown>> };
+    expect(tasks.tasks.length).toBe(1);
+    expect(tasks.tasks[0]?.status).toBe('exceeded');
+  }, 240_000);
 });
