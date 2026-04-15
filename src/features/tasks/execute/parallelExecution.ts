@@ -16,10 +16,10 @@ import { info, blankLine } from '../../../shared/ui/index.js';
 import { TaskPrefixWriter } from '../../../shared/ui/TaskPrefixWriter.js';
 import { EXIT_SIGINT } from '../../../shared/exitCodes.js';
 import { createLogger } from '../../../shared/utils/index.js';
-import { executeAndCompleteTask } from './taskExecution.js';
+import { executeAndCompleteRunTask } from './runTaskExecution.js';
 import { ShutdownManager } from './shutdownManager.js';
 import { isInputWaiting } from './inputWait.js';
-import type { TaskExecutionOptions } from './types.js';
+import type { RunTaskExecutionOptions } from './types.js';
 
 const log = createLogger('worker-pool');
 
@@ -94,7 +94,7 @@ export async function runWithWorkerPool(
   initialTasks: TaskInfo[],
   concurrency: number,
   cwd: string,
-  options: TaskExecutionOptions | undefined,
+  options: RunTaskExecutionOptions | undefined,
   pollIntervalMs: number,
 ): Promise<WorkerPoolResult> {
   const abortController = new AbortController();
@@ -199,7 +199,7 @@ function fillSlots(
   concurrency: number,
   taskRunner: TaskRunner,
   cwd: string,
-  options: TaskExecutionOptions | undefined,
+  options: RunTaskExecutionOptions | undefined,
   abortController: AbortController,
   colorCounter: { value: number },
 ): void {
@@ -224,7 +224,7 @@ function fillSlots(
       info(`=== Task: ${task.name} ===`);
     }
 
-    const promise = executeAndCompleteTask(task, taskRunner, cwd, options, {
+    const promise = executeAndCompleteRunTask(task, taskRunner, cwd, options, {
       abortSignal: abortController.signal,
       taskPrefix: isParallel ? taskPrefix : undefined,
       taskColorIndex: isParallel ? colorIndex : undefined,

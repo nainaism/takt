@@ -111,6 +111,8 @@ takt run
 4. 実行後フロー（`auto_pr` 設定時は PR 作成）
 5. `tasks.yaml` のステータス更新（`completed` または `failed`）
 
+workflow が `max_steps` に到達した場合、通常の `takt run` はタスクを後で再開できるよう `exceeded` として記録します。今回のコマンドでその反復上限を無視して通常どおり `completed` または `failed` まで進めたい場合は `takt run --ignore-exceed` を使用します。
+
 ### 並列実行（Concurrency）
 
 デフォルトではタスクは逐次実行されます（`concurrency: 1`）。`~/.takt/config.yaml` で並列実行を設定できます。

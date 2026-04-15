@@ -283,6 +283,44 @@ describe('WorkflowEngine: onIterationLimit - exceeded behavior', () => {
     // Then: iteration:limit event emitted before onIterationLimit callback
     expect(eventOrder).toEqual(['iteration:limit', 'onIterationLimit']);
   });
+
+  it('should complete past maxSteps when ignoreIterationLimit is enabled', async () => {
+    const config: WorkflowConfig = {
+      name: 'test',
+      maxSteps: 1,
+      initialStep: 'plan',
+      steps: [
+        makeStep('plan', {
+          rules: [makeRule('done', 'implement')],
+        }),
+        makeStep('implement', {
+          rules: [makeRule('done', 'COMPLETE')],
+        }),
+      ],
+    };
+
+    mockRunAgentSequence([
+      makeResponse({ persona: 'plan', content: 'Plan complete' }),
+      makeResponse({ persona: 'implement', content: 'Implementation complete' }),
+    ]);
+    mockDetectMatchedRuleSequence([
+      { index: 0, method: 'phase1_tag' },
+      { index: 0, method: 'phase1_tag' },
+    ]);
+    const onIterationLimit = vi.fn();
+
+    engine = new WorkflowEngine(config, tmpDir, 'test task', {
+      projectCwd: tmpDir,
+      ignoreIterationLimit: true,
+      onIterationLimit,
+    } as never);
+
+    const state = await engine.run();
+
+    expect(state.status).toBe('completed');
+    expect(state.iteration).toBe(2);
+    expect(onIterationLimit).not.toHaveBeenCalled();
+  });
 });
 
 describe('WorkflowEngine: initialIteration option', () => {

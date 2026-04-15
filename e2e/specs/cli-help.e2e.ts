@@ -50,6 +50,7 @@ describe('E2E: Help command (takt --help)', () => {
     expect(result.exitCode).toBe(0);
     const output = result.stdout.toLowerCase();
     expect(output).toMatch(/run|task|pending/);
+    expect(output).toContain('--ignore-exceed');
   });
 
   it('should show prompt argument help without current-workflow wording', () => {

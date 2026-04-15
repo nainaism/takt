@@ -6,9 +6,10 @@
  * during automated workflow runs — AskUserQuestion is always blocked.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, beforeEach, vi } from 'vitest';
 import type { WorkflowConfig, WorkflowResumePoint } from '../core/models/index.js';
 import { AskUserQuestionDeniedError } from '../core/workflow/ask-user-question-error.js';
+import type { WorkflowExecutionOptions } from '../features/tasks/execute/types.js';
 
 const { MockWorkflowEngine } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -46,7 +47,7 @@ const { MockWorkflowEngine } = vi.hoisted(() => {
 
     async run(): Promise<{ status: string; iteration: number }> {
       const firstStep = this.config.steps[0];
-      if (MockWorkflowEngine.triggerIterationLimit) {
+      if (MockWorkflowEngine.triggerIterationLimit && this.receivedOptions.ignoreIterationLimit !== true) {
         if (!firstStep) {
           throw new Error('Test fixture requires at least one step');
         }
@@ -176,6 +177,7 @@ vi.mock('../shared/exitCodes.js', () => ({
 }));
 
 import { executeWorkflow } from '../features/tasks/execute/workflowExecution.js';
+import { executeWorkflowForRun } from '../features/tasks/execute/workflowRunExecution.js';
 import { selectOption } from '../shared/prompt/index.js';
 import { error, info } from '../shared/ui/index.js';
 
@@ -239,6 +241,39 @@ describe('executeWorkflow AskUserQuestion deny handler wiring', () => {
 
     // Then: workflow completes successfully
     expect(result.success).toBe(true);
+  });
+
+  it('should keep ignoreExceed out of public workflow execution options', () => {
+    expectTypeOf<WorkflowExecutionOptions>().not.toHaveProperty('ignoreExceed');
+  });
+
+  it('should convert run-only iteration control to ignoreIterationLimit for WorkflowEngine', async () => {
+    await executeWorkflowForRun(
+      makeConfig(),
+      'task',
+      '/tmp/project',
+      { projectCwd: '/tmp/project' },
+      { ignoreIterationLimit: true },
+    );
+
+    expect(MockWorkflowEngine.lastInstance.receivedOptions.ignoreIterationLimit).toBe(true);
+    expect(MockWorkflowEngine.lastInstance.receivedOptions.ignoreExceed).toBeUndefined();
+  });
+
+  it('should keep exceeded metadata unset when run mode ignores the iteration limit', async () => {
+    MockWorkflowEngine.triggerIterationLimit = true;
+
+    const result = await executeWorkflowForRun(
+      makeConfig(),
+      'task',
+      '/tmp/project',
+      { projectCwd: '/tmp/project' },
+      { ignoreIterationLimit: true },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.exceeded).toBe(false);
+    expect(result.exceededInfo).toBeUndefined();
   });
 
   it('should mark exceeded without prompting even when interactiveUserInput is true', async () => {

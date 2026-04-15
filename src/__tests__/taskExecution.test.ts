@@ -2,15 +2,17 @@
  * Tests for execute task option propagation.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi, beforeEach } from 'vitest';
 import type { TaskInfo } from '../infra/task/index.js';
 import { attachWorkflowSourcePath, attachWorkflowTrustInfo } from '../infra/config/loaders/workflowSourceMetadata.js';
+import type { TaskExecutionOptions } from '../features/tasks/execute/types.js';
 
-const { mockResolveTaskExecution, mockResolveTaskIssue, mockExecuteWorkflow, mockLoadWorkflowByIdentifier, mockIsWorkflowPath, mockResolveWorkflowConfigValues, mockResolveProviderOptionsWithTrace, mockBuildBooleanTaskResult, mockBuildTaskResult, mockPersistTaskResult, mockPersistPrFailedTaskResult, mockPersistTaskError, mockPostExecutionFlow, mockUpdateRunningTaskExecution } =
+const { mockResolveTaskExecution, mockResolveTaskIssue, mockExecuteWorkflow, mockExecuteWorkflowForRun, mockLoadWorkflowByIdentifier, mockIsWorkflowPath, mockResolveWorkflowConfigValues, mockResolveProviderOptionsWithTrace, mockBuildBooleanTaskResult, mockBuildTaskResult, mockPersistTaskResult, mockPersistPrFailedTaskResult, mockPersistTaskError, mockPostExecutionFlow, mockUpdateRunningTaskExecution } =
   vi.hoisted(() => ({
     mockResolveTaskExecution: vi.fn(),
     mockResolveTaskIssue: vi.fn(),
     mockExecuteWorkflow: vi.fn(),
+    mockExecuteWorkflowForRun: vi.fn(),
     mockLoadWorkflowByIdentifier: vi.fn(),
     mockIsWorkflowPath: vi.fn(() => false),
     mockResolveWorkflowConfigValues: vi.fn(),
@@ -31,6 +33,10 @@ vi.mock('../features/tasks/execute/resolveTask.js', () => ({
 
 vi.mock('../features/tasks/execute/workflowExecution.js', () => ({
   executeWorkflow: (...args: unknown[]) => mockExecuteWorkflow(...args),
+}));
+
+vi.mock('../features/tasks/execute/workflowRunExecution.js', () => ({
+  executeWorkflowForRun: (...args: unknown[]) => mockExecuteWorkflowForRun(...args),
 }));
 
 vi.mock('../features/tasks/execute/taskResultHandler.js', () => ({
@@ -79,7 +85,9 @@ vi.mock('../shared/i18n/index.js', () => ({
   getLabel: vi.fn((key: string) => key),
 }));
 
+import * as taskExecutionModule from '../features/tasks/execute/taskExecution.js';
 import { executeAndCompleteTask, executeTask } from '../features/tasks/execute/taskExecution.js';
+import { executeAndCompleteRunTask } from '../features/tasks/execute/runTaskExecution.js';
 import { error, info } from '../shared/ui/index.js';
 
 const createTask = (name: string): TaskInfo => ({
@@ -98,6 +106,13 @@ function createTaskRunnerMock() {
 }
 
 const executeAndCompleteTaskWithoutWorkflow = executeAndCompleteTask as (
+  task: TaskInfo,
+  taskRunner: unknown,
+  projectCwd: string,
+  executeOptions?: unknown,
+  parallelOptions?: unknown,
+) => Promise<boolean>;
+const executeAndCompleteRunTaskWithoutWorkflow = executeAndCompleteRunTask as (
   task: TaskInfo,
   taskRunner: unknown,
   projectCwd: string,
@@ -153,6 +168,7 @@ describe('executeAndCompleteTask', () => {
       issueNumber: undefined,
     });
     mockExecuteWorkflow.mockResolvedValue({ success: true });
+    mockExecuteWorkflowForRun.mockResolvedValue({ success: true });
     mockResolveTaskIssue.mockReturnValue(undefined);
     mockUpdateRunningTaskExecution.mockImplementation((taskName: string, execution: { runSlug: string; worktreePath?: string; branch?: string }) => ({
       ...createTask(taskName),
@@ -246,6 +262,51 @@ describe('executeAndCompleteTask', () => {
     };
     expect(workflowExecutionOptions?.provider).toBe('codex');
     expect(workflowExecutionOptions?.model).toBe('gpt-5.3-codex');
+  });
+
+  it('should keep ignoreExceed out of public task execution overrides', () => {
+    expectTypeOf<TaskExecutionOptions>().not.toHaveProperty('ignoreExceed');
+    expectTypeOf<Parameters<typeof executeAndCompleteTask>[3]>().not.toHaveProperty('ignoreExceed');
+    expect(taskExecutionModule).not.toHaveProperty('executeAndCompleteRunTask');
+  });
+
+  it('should keep the run-only workflow executor out of the public task completion entrypoint', async () => {
+    const task = createTask('task-public-boundary');
+
+    await executeAndCompleteTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+      { provider: 'mock' },
+    );
+
+    expect(mockExecuteWorkflow).toHaveBeenCalledTimes(1);
+    expect(mockExecuteWorkflowForRun).not.toHaveBeenCalled();
+  });
+
+  it('should pass ignoreExceed to the internal run workflow path only through run task execution options', async () => {
+    const task = createTask('task-ignore-exceed');
+
+    await executeAndCompleteRunTaskWithoutWorkflow(
+      task,
+      createTaskRunnerMock() as never,
+      '/project',
+      {
+        provider: 'mock',
+        ignoreExceed: true,
+      },
+    );
+
+    expect(mockExecuteWorkflow).not.toHaveBeenCalled();
+    expect(mockExecuteWorkflowForRun).toHaveBeenCalledTimes(1);
+    const workflowExecutionOptions = mockExecuteWorkflowForRun.mock.calls[0]?.[3] as {
+      provider?: string;
+    };
+    const runControlOptions = mockExecuteWorkflowForRun.mock.calls[0]?.[4] as {
+      ignoreIterationLimit?: boolean;
+    };
+    expect(workflowExecutionOptions?.provider).toBe('mock');
+    expect(runControlOptions?.ignoreIterationLimit).toBe(true);
   });
 
   it('should resolve workflow paths relative to execCwd when running inside a worktree', async () => {

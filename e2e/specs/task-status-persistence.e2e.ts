@@ -29,6 +29,58 @@ function writeSinglePendingTask(repoPath: string, workflowPath: string): void {
   );
 }
 
+function writeExceedingWorkflow(repoPath: string): string {
+  const workflowPath = join(repoPath, '.takt', 'workflows', 'mock-ignore-exceed.yaml');
+  mkdirSync(dirname(workflowPath), { recursive: true });
+  writeFileSync(
+    workflowPath,
+    [
+      'name: mock-ignore-exceed',
+      'description: Workflow that exceeds max_steps once and then completes',
+      'personas:',
+      '  test-coder: |',
+      '    You are the E2E test coder.',
+      'max_steps: 1',
+      'initial_step: step-a',
+      'steps:',
+      '  - name: step-a',
+      '    edit: true',
+      '    persona: test-coder',
+      '    required_permission_mode: edit',
+      '    instruction: |',
+      '      {task}',
+      '    rules:',
+      '      - condition: Done',
+      '        next: step-b',
+      '  - name: step-b',
+      '    edit: true',
+      '    persona: test-coder',
+      '    required_permission_mode: edit',
+      '    instruction: |',
+      '      Continue the task.',
+      '    rules:',
+      '      - condition: Done',
+      '        next: COMPLETE',
+    ].join('\n'),
+    'utf-8',
+  );
+  return workflowPath;
+}
+
+function writeExceedingScenario(repoPath: string): string {
+  const scenarioPath = join(repoPath, '.takt', 'scenarios', 'mock-ignore-exceed.json');
+  mkdirSync(dirname(scenarioPath), { recursive: true });
+  writeFileSync(
+    scenarioPath,
+    JSON.stringify([
+      { status: 'done', content: 'Step A output.' },
+      { status: 'done', content: 'Step B output.' },
+    ], null, 2),
+    'utf-8',
+  );
+  return scenarioPath;
+}
+
 // E2E更新時は docs/testing/e2e.md も更新すること
 describe('E2E: Task status persistence in tasks.yaml (mock)', () => {
   let isolatedEnv: IsolatedEnv;
@@ -106,5 +158,63 @@ describe('E2E: Task status persistence in tasks.yaml (mock)', () => {
     expect(tasks.tasks[0]?.started_at).toBeTruthy();
     expect(tasks.tasks[0]?.completed_at).toBeTruthy();
     expect(tasks.tasks[0]?.failure?.error).toBeTruthy();
+  }, 240_000);
+
+  it('should persist exceeded status without --ignore-exceed when max_steps is reached first', () => {
+    const workflowPath = writeExceedingWorkflow(repo.path);
+    const scenarioPath = writeExceedingScenario(repo.path);
+
+    writeSinglePendingTask(repo.path, workflowPath);
+
+    const result = runTakt({
+      args: ['run', '--provider', 'mock'],
+      cwd: repo.path,
+      env: {
+        ...isolatedEnv.env,
+        TAKT_MOCK_SCENARIO: scenarioPath,
+      },
+      timeout: 240_000,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const tasksContent = readFileSync(join(repo.path, '.takt', 'tasks.yaml'), 'utf-8');
+    const tasks = parseYaml(tasksContent) as { tasks: Array<Record<string, unknown>> };
+    expect(Array.isArray(tasks.tasks)).toBe(true);
+    expect(tasks.tasks.length).toBe(1);
+    const task = tasks.tasks[0];
+    expect(task?.status).toBe('exceeded');
+    expect(task?.exceeded_max_steps).toBe(2);
+    expect(task?.exceeded_current_iteration).toBe(1);
+    expect(task).toHaveProperty('resume_point');
+  }, 240_000);
+
+  it('should persist completed status with --ignore-exceed after exceeding max_steps', () => {
+    const workflowPath = writeExceedingWorkflow(repo.path);
+    const scenarioPath = writeExceedingScenario(repo.path);
+
+    writeSinglePendingTask(repo.path, workflowPath);
+
+    const result = runTakt({
+      args: ['run', '--ignore-exceed', '--provider', 'mock'],
+      cwd: repo.path,
+      env: {
+        ...isolatedEnv.env,
+        TAKT_MOCK_SCENARIO: scenarioPath,
+      },
+      timeout: 240_000,
+    });
+
+    expect(result.exitCode).toBe(0);
+
+    const tasksContent = readFileSync(join(repo.path, '.takt', 'tasks.yaml'), 'utf-8');
+    const tasks = parseYaml(tasksContent) as { tasks: Array<Record<string, unknown>> };
+    expect(Array.isArray(tasks.tasks)).toBe(true);
+    expect(tasks.tasks.length).toBe(1);
+    const task = tasks.tasks[0];
+    expect(task?.status).toBe('completed');
+    expect(task?.exceeded_max_steps).toBeUndefined();
+    expect(task?.exceeded_current_iteration).toBeUndefined();
+    expect(task?.resume_point).toBeUndefined();
   }, 240_000);
 });

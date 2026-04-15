@@ -90,6 +90,10 @@ export interface TaskExecutionOptions {
   model?: string;
 }
 
+export interface RunTaskExecutionOptions extends TaskExecutionOptions {
+  ignoreExceed?: boolean;
+}
+
 export interface ExecuteTaskOptions {
   /** Task content */
   task: string;

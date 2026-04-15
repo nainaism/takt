@@ -11,13 +11,13 @@ import {
   buildSlackRunSummary,
 } from '../../../shared/utils/index.js';
 import { getLabel } from '../../../shared/i18n/index.js';
-import type { TaskExecutionOptions } from './types.js';
+import type { RunTaskExecutionOptions } from './types.js';
 import { runWithWorkerPool } from './parallelExecution.js';
 import { generateRunId, toSlackTaskDetail } from './slackSummaryAdapter.js';
 
 export async function runAllTasks(
   cwd: string,
-  options?: TaskExecutionOptions,
+  options?: RunTaskExecutionOptions,
 ): Promise<void> {
   const taskRunner = new TaskRunner(cwd, { onWarning: warn });
   const globalConfig = resolveWorkflowConfigValues(

@@ -38,10 +38,10 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
   }),
 }));
 
-const mockExecuteAndCompleteTask = vi.fn();
+const mockExecuteAndCompleteRunTask = vi.fn();
 
-vi.mock('../features/tasks/execute/taskExecution.js', () => ({
-  executeAndCompleteTask: (...args: unknown[]) => mockExecuteAndCompleteTask(...args),
+vi.mock('../features/tasks/execute/runTaskExecution.js', () => ({
+  executeAndCompleteRunTask: (...args: unknown[]) => mockExecuteAndCompleteRunTask(...args),
 }));
 
 import { runWithWorkerPool } from '../features/tasks/execute/parallelExecution.js';
@@ -69,7 +69,7 @@ function createMockTaskRunner() {
 beforeEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
-  mockExecuteAndCompleteTask.mockResolvedValue(true);
+  mockExecuteAndCompleteRunTask.mockResolvedValue(true);
 });
 
 describe('worker pool: abort signal propagation', () => {
@@ -92,7 +92,7 @@ describe('worker pool: abort signal propagation', () => {
     const runner = createMockTaskRunner();
     const receivedSignals: (AbortSignal | undefined)[] = [];
 
-    mockExecuteAndCompleteTask.mockImplementation(
+    mockExecuteAndCompleteRunTask.mockImplementation(
       (_task: unknown, _runner: unknown, _cwd: unknown, _opts: unknown, parallelOpts: { abortSignal?: AbortSignal }) => {
         receivedSignals.push(parallelOpts?.abortSignal);
         return Promise.resolve(true);
@@ -113,7 +113,7 @@ describe('worker pool: abort signal propagation', () => {
     const runner = createMockTaskRunner();
     let capturedSignal: AbortSignal | undefined;
 
-    mockExecuteAndCompleteTask.mockImplementation(
+    mockExecuteAndCompleteRunTask.mockImplementation(
       (_task: unknown, _runner: unknown, _cwd: unknown, _opts: unknown, parallelOpts: { abortSignal?: AbortSignal }) => {
         capturedSignal = parallelOpts?.abortSignal;
         return new Promise((resolve) => {
@@ -153,7 +153,7 @@ describe('worker pool: abort signal propagation', () => {
     const receivedSignalsSeq: (AbortSignal | undefined)[] = [];
     const receivedSignalsPar: (AbortSignal | undefined)[] = [];
 
-    mockExecuteAndCompleteTask.mockImplementation(
+    mockExecuteAndCompleteRunTask.mockImplementation(
       (_task: unknown, _runner: unknown, _cwd: unknown, _opts: unknown, parallelOpts: { abortSignal?: AbortSignal }) => {
         receivedSignalsSeq.push(parallelOpts?.abortSignal);
         return Promise.resolve(true);
@@ -163,8 +163,8 @@ describe('worker pool: abort signal propagation', () => {
     // Sequential mode
     await runWithWorkerPool(runner as never, [...tasks], 1, '/cwd', undefined, 50);
 
-    mockExecuteAndCompleteTask.mockClear();
-    mockExecuteAndCompleteTask.mockImplementation(
+    mockExecuteAndCompleteRunTask.mockClear();
+    mockExecuteAndCompleteRunTask.mockImplementation(
       (_task: unknown, _runner: unknown, _cwd: unknown, _opts: unknown, parallelOpts: { abortSignal?: AbortSignal }) => {
         receivedSignalsPar.push(parallelOpts?.abortSignal);
         return Promise.resolve(true);

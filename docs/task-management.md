@@ -111,6 +111,8 @@ The `run` command claims pending tasks and executes them through the configured 
 4. Post-execution flow (PR creation if `auto_pr` is set)
 5. Status update in `tasks.yaml` (`completed` or `failed`)
 
+If a workflow reaches `max_steps`, the default `takt run` behavior records the task as `exceeded` so it can be resumed later. Run `takt run --ignore-exceed` to ignore that iteration limit for this command and let the task continue to its normal `completed` or `failed` outcome.
+
 ### Parallel Execution (Concurrency)
 
 By default, tasks run sequentially (`concurrency: 1`). Configure parallel execution in `~/.takt/config.yaml`:
