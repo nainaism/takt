@@ -1,11 +1,15 @@
+import type { WorkflowResumePoint } from '../../core/models/index.js';
 import type { TaskRecord } from './schema.js';
 import { TaskStore } from './store.js';
 import { nowIso } from './naming.js';
 
 export interface ExceedTaskOptions {
-  currentMovement: string;
-  newMaxMovements: number;
+  currentStep: string;
+  newMaxSteps: number;
   currentIteration: number;
+  resumePoint?: WorkflowResumePoint;
+  worktreePath?: string;
+  branch?: string;
 }
 
 export class TaskExceedService {
@@ -27,9 +31,12 @@ export class TaskExceedService {
         completed_at: nowIso(),
         owner_pid: null,
         failure: undefined,
-        start_movement: options.currentMovement,
-        exceeded_max_movements: options.newMaxMovements,
+        start_step: options.currentStep,
+        exceeded_max_steps: options.newMaxSteps,
         exceeded_current_iteration: options.currentIteration,
+        resume_point: options.resumePoint,
+        ...(options.worktreePath ? { worktree_path: options.worktreePath } : {}),
+        ...(options.branch ? { branch: options.branch } : {}),
       };
 
       const tasks = [...current.tasks];

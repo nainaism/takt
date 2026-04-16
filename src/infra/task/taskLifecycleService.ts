@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import { TaskRecordSchema, type TaskFileData, type TaskRecord, type TaskFailure } from './schema.js';
 import type { TaskInfo, TaskResult } from './types.js';
 import { toTaskInfo } from './mapper.js';
@@ -6,13 +5,21 @@ import { TaskStore } from './store.js';
 import { firstLine, nowIso } from './naming.js';
 import { slugify } from '../../shared/utils/slug.js';
 import { isStaleRunningTask } from './process.js';
-import type { TaskStatus } from './schema.js';
+import { readRetryMetadataByRunSlug } from '../../core/workflow/run/retry-metadata.js';
+import {
+  buildClaimedTaskRecord,
+  buildRecoveredTaskRecord,
+  type ResolvedTaskRetryMetadata,
+  buildTerminalTaskRecord,
+  generateTaskName,
+} from './taskRecordMutations.js';
 
 export class TaskLifecycleService {
   constructor(
     private readonly projectDir: string,
     private readonly tasksFile: string,
     private readonly store: TaskStore,
+    private readonly onWarning?: (warning: string) => void,
   ) {}
 
   addTask(
@@ -27,7 +34,7 @@ export class TaskLifecycleService {
   ): TaskInfo {
     const state = this.store.update((current) => {
       const slug = options?.slug ?? slugify(firstLine(content));
-      const name = this.generateTaskName(slug, current.tasks.map((task) => task.name));
+      const name = generateTaskName(slug, current.tasks.map((task) => task.name));
       const contentValue = options?.task_dir ? undefined : content;
       const record: TaskRecord = TaskRecordSchema.parse({
         name,
@@ -62,12 +69,7 @@ export class TaskLifecycleService {
       let remaining = count;
       const tasks = current.tasks.map((task) => {
         if (remaining > 0 && task.status === 'pending') {
-          const next: TaskRecord = {
-            ...task,
-            status: 'running',
-            started_at: nowIso(),
-            owner_pid: process.pid,
-          };
+          const next = buildClaimedTaskRecord(task);
           claimed.push(next);
           remaining--;
           return next;
@@ -88,16 +90,23 @@ export class TaskLifecycleService {
           return task;
         }
         recovered++;
-        return {
-          ...task,
-          status: 'pending',
-          started_at: null,
-          owner_pid: null,
-        } as TaskRecord;
+        return buildRecoveredTaskRecord(task);
       });
       return { tasks };
     });
     return recovered;
+  }
+
+  private readTerminalRetryMetadata(task: TaskRecord): ResolvedTaskRetryMetadata {
+    if (!task.run_slug) {
+      return {};
+    }
+
+    return readRetryMetadataByRunSlug(
+      task.worktree_path ?? this.projectDir,
+      task.run_slug,
+      this.onWarning,
+    );
   }
 
   completeTask(result: TaskResult): string {
@@ -112,8 +121,7 @@ export class TaskLifecycleService {
       }
 
       const target = current.tasks[index]!;
-      const updated: TaskRecord = {
-        ...target,
+      const updated = buildTerminalTaskRecord(target, {
         status: 'completed',
         started_at: result.startedAt,
         completed_at: result.completedAt,
@@ -122,7 +130,7 @@ export class TaskLifecycleService {
         branch: result.branch ?? target.branch,
         worktree_path: result.worktreePath ?? target.worktree_path,
         pr_url: result.prUrl ?? target.pr_url,
-      };
+      });
       const tasks = [...current.tasks];
       tasks[index] = updated;
       return { tasks };
@@ -133,7 +141,7 @@ export class TaskLifecycleService {
 
   failTask(result: TaskResult): string {
     const failure: TaskFailure = {
-      movement: result.failureMovement,
+      step: result.failureStep,
       error: result.response,
       last_message: result.failureLastMessage ?? result.executionLog[result.executionLog.length - 1],
     };
@@ -145,8 +153,7 @@ export class TaskLifecycleService {
       }
 
       const target = current.tasks[index]!;
-      const updated: TaskRecord = {
-        ...target,
+      const updated = buildTerminalTaskRecord(target, {
         status: 'failed',
         started_at: result.startedAt,
         completed_at: result.completedAt,
@@ -154,13 +161,68 @@ export class TaskLifecycleService {
         failure,
         branch: result.branch ?? target.branch,
         worktree_path: result.worktreePath ?? target.worktree_path,
-      };
+      }, this.readTerminalRetryMetadata(target));
       const tasks = [...current.tasks];
       tasks[index] = updated;
       return { tasks };
     });
 
     return this.tasksFile;
+  }
+
+  forceFailRunningTask(taskName: string, failure: TaskFailure): string {
+    this.store.update((current) => {
+      const index = current.tasks.findIndex((task) => task.name === taskName && task.status === 'running');
+      if (index === -1) {
+        throw new Error(`Running task not found for force-fail: ${taskName}`);
+      }
+
+      const target = current.tasks[index]!;
+      const updated = buildTerminalTaskRecord(target, {
+        status: 'failed',
+        completed_at: nowIso(),
+        owner_pid: null,
+        failure,
+      }, this.readTerminalRetryMetadata(target));
+      const tasks = [...current.tasks];
+      tasks[index] = updated;
+      return { tasks };
+    });
+
+    return this.tasksFile;
+  }
+
+  updateRunningTaskExecution(
+    taskName: string,
+    execution: {
+      runSlug: string;
+      worktreePath?: string;
+      branch?: string;
+    },
+  ): TaskInfo {
+    let found: TaskRecord | undefined;
+
+    this.store.update((current) => {
+      const index = current.tasks.findIndex((task) => task.name === taskName && task.status === 'running');
+      if (index === -1) {
+        throw new Error(`Running task not found for execution update: ${taskName}`);
+      }
+
+      const target = current.tasks[index]!;
+      const updated: TaskRecord = {
+        ...target,
+        run_slug: execution.runSlug,
+        worktree_path: execution.worktreePath ?? target.worktree_path,
+        branch: execution.branch ?? target.branch,
+      };
+
+      found = updated;
+      const tasks = [...current.tasks];
+      tasks[index] = updated;
+      return { tasks };
+    });
+
+    return toTaskInfo(this.projectDir, this.tasksFile, found!);
   }
 
   prFailTask(result: TaskResult, prError: string): string {
@@ -175,8 +237,7 @@ export class TaskLifecycleService {
       }
 
       const target = current.tasks[index]!;
-      const updated: TaskRecord = {
-        ...target,
+      const updated = buildTerminalTaskRecord(target, {
         status: 'pr_failed',
         started_at: result.startedAt,
         completed_at: result.completedAt,
@@ -185,112 +246,13 @@ export class TaskLifecycleService {
         branch: result.branch ?? target.branch,
         worktree_path: result.worktreePath ?? target.worktree_path,
         pr_url: result.prUrl ?? target.pr_url,
-      };
+      }, this.readTerminalRetryMetadata(target));
       const tasks = [...current.tasks];
       tasks[index] = updated;
       return { tasks };
     });
 
     return this.tasksFile;
-  }
-
-  requeueFailedTask(taskRef: string, startMovement?: string, retryNote?: string): string {
-    return this.requeueTask(taskRef, ['failed'], startMovement, retryNote);
-  }
-
-  /**
-   * Atomically transition a completed/failed task to running for re-execution.
-   * Avoids the race condition of requeueTask(→ pending) + claimNextTasks(→ running).
-   */
-  startReExecution(
-    taskRef: string,
-    allowedStatuses: readonly TaskStatus[],
-    startMovement?: string,
-    retryNote?: string,
-  ): TaskInfo {
-    const taskName = this.normalizeTaskRef(taskRef);
-    let found: TaskRecord | undefined;
-
-    this.store.update((current) => {
-      const index = current.tasks.findIndex((task) => (
-        task.name === taskName
-        && allowedStatuses.includes(task.status)
-      ));
-      if (index === -1) {
-        const expectedStatuses = allowedStatuses.join(', ');
-        throw new Error(`Task not found for re-execution: ${taskRef} (expected status: ${expectedStatuses})`);
-      }
-
-      const target = current.tasks[index]!;
-      const updated: TaskRecord = {
-        ...target,
-        status: 'running',
-        started_at: nowIso(),
-        completed_at: null,
-        owner_pid: process.pid,
-        failure: undefined,
-        start_movement: startMovement,
-        retry_note: retryNote,
-      };
-
-      found = updated;
-      const tasks = [...current.tasks];
-      tasks[index] = updated;
-      return { tasks };
-    });
-
-    return toTaskInfo(this.projectDir, this.tasksFile, found!);
-  }
-
-  requeueTask(
-    taskRef: string,
-    allowedStatuses: readonly TaskStatus[],
-    startMovement?: string,
-    retryNote?: string,
-  ): string {
-    const taskName = this.normalizeTaskRef(taskRef);
-
-    this.store.update((current) => {
-      const index = current.tasks.findIndex((task) => (
-        task.name === taskName
-        && allowedStatuses.includes(task.status)
-      ));
-      if (index === -1) {
-        const expectedStatuses = allowedStatuses.join(', ');
-        throw new Error(`Task not found for requeue: ${taskRef} (expected status: ${expectedStatuses})`);
-      }
-
-      const target = current.tasks[index]!;
-      const updated: TaskRecord = {
-        ...target,
-        status: 'pending',
-        started_at: null,
-        completed_at: null,
-        owner_pid: null,
-        failure: undefined,
-        start_movement: startMovement,
-        retry_note: retryNote,
-      };
-
-      const tasks = [...current.tasks];
-      tasks[index] = updated;
-      return { tasks };
-    });
-
-    return this.tasksFile;
-  }
-
-  private normalizeTaskRef(taskRef: string): string {
-    if (!taskRef.includes(path.sep)) {
-      return taskRef;
-    }
-
-    const base = path.basename(taskRef);
-    if (base.includes('_')) {
-      return base.slice(base.indexOf('_') + 1);
-    }
-
-    return base;
   }
 
   private findActiveTaskIndex(tasks: TaskRecord[], name: string): number {
@@ -299,16 +261,5 @@ export class TaskLifecycleService {
 
   private isRunningTaskStale(task: TaskRecord): boolean {
     return isStaleRunningTask(task.owner_pid ?? undefined);
-  }
-
-  private generateTaskName(slug: string, existingNames: string[]): string {
-    const base = slug || `task-${Date.now()}`;
-    let candidate = base;
-    let counter = 1;
-    while (existingNames.includes(candidate)) {
-      candidate = `${base}-${counter}`;
-      counter++;
-    }
-    return candidate;
   }
 }

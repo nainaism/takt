@@ -67,6 +67,45 @@ Treat initial page load separately from reactive refetching. Unless refetching i
 | Loading state updates trigger refetching | REJECT |
 | Message display or dialog state triggers refetching | REJECT |
 
+## Data Fetching Library Cache Suitability
+
+Data fetching library caching (React Query, etc.) is not appropriate for all data. Judge by data volatility and pagination method.
+
+| Data Characteristics | Cache | Verdict |
+|---------------------|-------|---------|
+| Single resource detail (settings, profile, etc.) | Effective | OK |
+| Stable list (master data, low change frequency) | Effective | OK |
+| Cursor-paginated list with mid-stream additions, deletions, or reordering | Ineffective | Use local state |
+| Offset-paginated list with mid-stream data changes | Ineffective | Use local state |
+
+Why cursor pagination and caching are incompatible:
+
+- The nextId (cursor) goes stale, causing gaps or duplicates when fetching the next page
+- Fetching the next page based on a deleted row causes missed records
+- Auto-refetching middle pages on tab refocus causes the visible list to diverge from the server's truth
+
+If you need to effectively disable caching even when using a data fetching library, there is no point in using that library. Fetching fresh data each time as the screen's responsibility is safer.
+
+```tsx
+// REJECT - applying React Query cache to a volatile cursor-paged list
+const { data } = useInfiniteQuery({
+  queryKey: ['records'],
+  queryFn: ({ pageParam }) => fetchRecords(pageParam),
+  getNextPageParam: (last) => last.nextId,
+  staleTime: 5 * 60 * 1000,  // caching despite mid-stream deletions
+})
+
+// OK - local state fetching as the screen's responsibility
+const [records, setRecords] = useState<Record[]>([])
+const [nextId, setNextId] = useState<string | undefined>()
+
+const loadMore = async () => {
+  const result = await fetchRecords(nextId)
+  setRecords(prev => [...prev, ...result.items])
+  setNextId(result.nextId)
+}
+```
+
 ## Custom Hook Responsibility
 
 A React custom hook should encapsulate state, effects, refs, or event translation. Pure calculations belong in function modules, not in a `use*` hook.

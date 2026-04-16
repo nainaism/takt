@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const { buildCandidateDirsWithPackage } = await import('../infra/config/loaders/resource-resolver.js');
+const { buildCandidateDirsWithPackage } = await import('../infra/config/loaders/workflowPackageScope.js');
 
 describe('project config dir collision in resource-resolver', () => {
   let projectDir: string;
@@ -38,14 +38,14 @@ describe('project config dir collision in resource-resolver', () => {
     expect(candidateDirs).toContain(join(realGlobalDir, 'facets', 'personas'));
   });
 
-  it('should keep package-local, user, and builtin layers when collision happens for a package piece', () => {
+  it('should keep package-local, user, and builtin layers when collision happens for a package workflow', () => {
     const repertoireDir = join(projectDir, '.takt', 'repertoire');
-    const pieceDir = join(repertoireDir, '@nrslib', 'takt-example', 'pieces');
+    const workflowDir = join(repertoireDir, '@nrslib', 'takt-example', 'workflows');
 
     const candidateDirs = buildCandidateDirsWithPackage('personas', {
       projectDir,
       lang: 'ja',
-      pieceDir,
+      workflowDir,
       repertoireDir,
     });
 

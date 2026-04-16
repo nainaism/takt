@@ -6,6 +6,263 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.36.0] - 2026-04-15
+
+### Added
+
+- サブワークフロー呼び出し（`call:` ステップ）を追加: ステップに `call: <workflow-name>` を指定すると、別のワークフローをサブルーチンとして実行可能。呼び出し先ワークフローは `subworkflow: { callable: true }` 宣言が必要。`overrides:` でプロバイダ/モデルの上書きも可能。再帰呼び出し検知・最大ネスト深度 5 (#153, #624)
+- システムステップ（`kind: system`）を追加: AI エージェントを介さずに実行されるステップ。`system_inputs:` でランタイムコンテキスト（タスク、ブランチ、PR、Issue、タスクキュー）をワークフロー状態にバインドし、`effects:` で副作用（`enqueue_task`, `comment_pr`, `sync_with_root`, `resolve_conflicts_with_ai`, `merge_pr`）を実行 (#586, #622)
+- 決定論的 `when:` ルール条件を追加: ルールに `condition:` の代わりに `when:` を指定すると、比較演算子（`==`, `!=`, `>`, `<`, `>=`, `<=`）やブール論理（`&&`, `||`）、ワークフロー状態参照（`context.*`, `structured.*`, `effect.*`）で AI を介さずルーティング (#586, #622)
+- ステップの構造化出力（`structured_output:`）を追加: `structured_output: { schema_ref: "<name>" }` でワークフロー定義の `schemas:` マップ内の JSON スキーマを参照し、エージェント出力をバリデーション・保存。他ステップから `{structured:step.field}` で参照可能 (#586, #622)
+- インタラクティブモードにスラッシュコマンド補完メニューを追加: `/` 入力時にインライン補完ドロップダウンを表示。矢印キーで選択、Tab で適用、Enter で確定。コンテキストに応じて `/retry` `/replay` の表示を制御 (#580)
+- Copilot プロバイダに `effort`（推論の深さ）設定を追加: `provider_options.copilot.effort` で `low` / `medium` / `high` / `xhigh` を指定可能 (#625)
+- `takt workflow init <name>` コマンドを追加: ワークフローのスキャフォールドを生成。`--template minimal|faceted`、`--steps <count>`、`--description <text>`、`--global` オプション対応 (#597)
+- `takt workflow doctor [targets]` コマンドを追加: ワークフロー YAML の定義を検証。ターゲット未指定時は `.takt/workflows/` 内の全ワークフローを検証。ワークフロー名またはファイルパスを指定可能 (#597)
+- 画面専用 API ポリシー（`screen-api`）を追加: 画面単位の専用エンドポイント、サーバー主導のページネーション、サーバーサイド集約、スコープ付きタブ通信を強制。全 dual 系ワークフローに適用
+- AI アンチパターンポリシーに早期キャッシュ戦略の禁止ルールを追加: 明示的な要求や計測なしにキャッシュレイヤー・localStorage キャッシュ・過度な memoization を導入することを REJECT
+
+### Changed
+
+- **BREAKING:** 旧用語 `piece` / `movement` を完全に廃止し、`workflow` / `step` に統一 (#602, #609)。ワークフロー YAML の `piece_config:` → `workflow_config:`、`movements:` → `steps:`、`initial_movement:` → `initial_step:`、`max_movements:` → `max_steps:` への移行が必須。ディレクトリも `~/.takt/pieces/` → `~/.takt/workflows/`、`.takt/pieces/` → `.takt/workflows/` に変更。レガシー環境変数（`TAKT_PIECE_*`）は引き続きマッピングされる
+- 非対応プロバイダ向けの provider-specific オプション（`claude.allowed_tools`、`mcp_servers`、`team_leader.part_allowed_tools`）をサイレントドロップするよう変更。ワークフローをプロバイダ非依存に保てるように改善
+- 全レビュー系インストラクションのエビデンスガイダンスを統一: `reopened` ステータスの追加、検証ターゲット・確認内容・観測結果の記録を必須化、オープン指摘事項の脱落防止ルールを追加
+
+### Fixed
+
+- 全 audit 系ワークフロー（7 種）で supervise ↔ review 間のデッドロックを修正。review ステップに `output_contracts` を追加し、ループモニターの閾値を 4→3 に調整、ジャッジの選択肢を 3 択（十分/進捗あり/停滞）に変更
+
+### Internal
+
+- `piece*` → `workflow*` のファイル名一括リネーム（84 ファイル、テスト・E2E フィクスチャ・ドキュメント含む）
+- `WorkflowEngine` をリファクタリング: `WorkflowEngineSetup`、`WorkflowEngineStepCoordinator`、`WorkflowRunLoop` に責務を分離
+- セッションロガーを `sessionLoggerPhaseTracker.ts`、`sessionLoggerRecordFactory.ts` に分割
+- `CapabilityAwareStructuredCaller` を追加し、プロバイダの構造化出力対応可否に応じたルーティングを実装
+- ルール評価を 10 段階フォールバックに拡張（`when:` 条件の評価ステージを追加）
+- `workflow-state-access.ts` でテンプレート参照（`{context:*}`、`{structured:*}`、`{effect:*}`）の統一解決を実装
+
+## [0.35.4] - 2026-04-11
+
+### Changed
+
+- レビューポリシーにツール出力の信頼性検証ルールを追加: ツール出力が正常に読めることを確認してから指摘すること、検索失敗だけでコード不在と断定しないことをルール化
+
+### Fixed
+
+- ターミナルの行数が少ない環境で選択メニューが正常に動作しない問題を修正。ビューポートベースのスクロールを追加 (#608)
+- Windows で `.cmd` shim の spawn が失敗する問題を修正（Claude Headless、Cursor、Copilot プロバイダ）
+
+### Internal
+
+- 選択メニューを `select-menu.ts`、`select-viewport.ts` に分離し、純粋関数化とビューポートテストを追加
+- ワークフロードキュメントの例で古いフィールド名を使っていた問題を修正 (#619)
+
+## [0.35.3] - 2026-04-10
+
+### Added
+
+- `loop_monitors` の judge に `provider`/`model` フィールドを追加。ジャッジムーブメントのプロバイダーとモデルを明示的に指定可能に (#599)
+- `takt list --action sync` を非インタラクティブモードでサポート
+
+### Changed
+
+- Codex プロバイダーのリトライ戦略を強化: 最大リトライ回数を 3→9 に増加、ベース遅延を 250ms→1000ms に変更、"at capacity" エラーを自動リトライ対象に追加 (#614)
+
+### Fixed
+
+- ループモニタージャッジが常にデフォルトプロバイダーで実行される問題を修正。トリガー元ムーブメントのプロバイダー/モデル設定を継承するよう変更 (#599)
+- 完了済みタスクのブランチ操作（merge/try-merge/diff）でルートブランチが欠落している場合にエラーとなる問題を修正。クローンから自動復元するよう改善 (#616)
+- Phase 2 エラーイベント（`phase:complete`）が `phase:start` より先に発火されることがある問題を修正
+
+### Internal
+
+- テストを多数追加（codex-client-retry, engine-loop-monitors, it-completed-task-root-branch, it-piece-loader, provider-resolution, taskBranchLifecycleActions 等）
+- `providerModelCompatibility` をコアモジュール（`src/core/piece/`）に移動
+- タスク実行後のプッシュ処理を簡素化（clone 内フォールバック push を廃止し、ルートリポジトリ経由に一本化）
+- git コマンドのエラーメッセージに stderr 詳細を含めるよう改善
+
+## [0.35.2] - 2026-04-09
+
+### Added
+
+- `takt list` でスタックした実行中タスクを強制失敗にできる「Mark as failed」アクションを追加 (#604)
+- タスクレコードに `run_slug` を追加し、実行中タスクの現在のステップ情報を `meta.json` から取得可能に
+
+### Changed
+
+- `write_tests` ムーブメントの出力契約を `test-scope.md` + `test-decisions.md` の2ファイルから `test-report.md` の1ファイルに簡素化
+
+### Internal
+
+- CI auto-tag ワークフローから冗長な build・test ステップを削除
+- `RunMeta` 型を `src/core/piece/run/run-meta.ts` に抽出し、`currentStep`/`currentIteration` トラッキングを追加
+
+## [0.35.1] - 2026-04-09
+
+### Added
+
+- タスク実行中に常時スピナーを表示: TTY 環境でタスク実行中にアニメーションスピナーを表示し、処理中であることを可視化
+- Claude Headless の thinking ストリーム表示: ヘッドレスモードで thinking トークンをリアルタイム表示。parallel モードでは色分け表示に対応
+
+### Changed
+
+- SIGINT（Ctrl+C）でクローン作成中でも即座にプロセスを終了できるよう改善: `run`/`watch` コマンドで raw mode による即時検知を導入し、git サブプロセスを AbortSignal で中断可能に
+
+### Fixed
+
+- Codex プロバイダが Git リポジトリ外での実行を拒否する問題を修正
+
+### Internal
+
+- StatusLine の wrapWrite をアロー関数にリファクタリング
+- StreamDisplay のハンドラーをムーブメントごとにキャッシュするよう最適化
+- クローン作成関連のテスト追加・更新
+
+## [0.35.0] - 2026-04-07
+
+### Added
+
+- Claude Headless プロバイダを追加: Claude CLI のヘッドレスモード（`claude --print`）をサブプロセスとして実行する新プロバイダ。`claude` プロバイダ名で利用可能 (#584)
+- trace ログレベルを追加: `poll_tick`/`no_new_tasks` などの高頻度ログを抑制し、デバッグログの可読性を向上。`logging.trace: true` で有効化
+- レガシー設定キーの非推奨警告: `piece_*`/`movement*` 系の旧キー使用時に deprecation warning を表示し、新しい `workflow_*`/`step*` キーへの移行を促進 (#581, #594)
+- Mock プロバイダで `delayMs` と AbortSignal をサポート: SIGINT テスト等で利用可能に (#595)
+
+### Changed
+
+- **BREAKING:** `claude` プロバイダがヘッドレス CLI モードをデフォルトに変更。従来の SDK ベースプロバイダは `claude-sdk` として引き続き利用可能 (#584)
+- クローン環境からのプッシュに relay push パターンを導入: 一時 ref 経由でプッシュすることで、チェックアウト中のブランチへの直接プッシュによるデータ損失を防止 (#592)
+- PR 由来タスクのメタデータ伝搬を改善: `shouldPublishBranchToOrigin` フラグにより、ローカルプッシュ失敗時にクローンから直接 origin へプッシュするフォールバックを追加 (#592)
+- dual/backend ワークフローの `max_steps` を 60 に増加
+
+### Fixed
+
+- `pr_body_template` が `--task` オプション実行時に無視される問題を修正 (#538)
+- 既存 PR ブランチ更新時にリモートを正として worktree を作成するよう修正 (#557)
+- SIGINT（Ctrl+C）が AI レスポンス待機中に正しくアボートされない問題を修正 (#595)
+- mise 等のバージョン管理ツール環境下で Claude SDK サブプロセスの PATH が安定しない問題を修正 (#591)
+- ジャッジムーブメントのプロバイダフォールバック解決が正しく機能しない問題を修正 (#577)
+- exceeded 時のワークツリーパスが正しく解決されない問題を修正 (#575)
+- PR 作成時のエラー詳細が失われる問題を修正
+- non-fast-forward プッシュ拒否時にヒントメッセージを表示するよう改善
+
+### Internal
+
+- `.takt/config.yaml` の非推奨キーをリネーム
+- レガシーワークフローキー非推奨警告の重複排除 (#594)
+- `AgentSetup` から `claudeAgent`/`claudeSkill` フィールドを削除（Headless プロバイダ移行に伴い不要に）
+- 型定義ファイルから冗長な JSDoc コメントを整理
+- review-fix-takt-default ワークフローの max_steps を増加
+
+## [0.34.0] - 2026-04-03
+
+### Added
+
+- StructuredCaller インターフェースを導入: プロバイダーのネイティブ構造化出力（Structured Output）をサポートし、ステータス判定・条件評価・タスク分解でテキストパースに代わる JSON ベースの応答抽出が可能に (#570)
+- Traced Config を導入: `traced-config` パッケージによる設定値の出所追跡（環境変数・設定ファイル・デフォルト値）をサポート (#558)
+- 並列ステップに `concurrency` フィールドを追加: セマフォベースの同時実行数制御が可能に
+- 無効なワークフロー YAML のロード時に警告を表示するようになった（スキーマバリデーションエラーの詳細を表示） (#540)
+- 計画・レビュー用ファセットを強化: planner・requirements-reviewer・supervisor のペルソナ、plan・requirements-review・supervisor-validation の出力契約、coding ポリシーを新規追加
+- `takt add` コマンドで `--workflow` オプションによるワークフロー指定に対応
+
+### Changed
+
+- **BREAKING:** ワークフロー YAML のキーをリネーム: `movements` → `steps`、`initial_movement` → `initial_step`、`max_movements` → `max_steps`、`piece_config` → `workflow_config`。旧キーは互換エイリアスとして引き続き使用可能 (#576)
+- **BREAKING:** ビルトインワークフローのディレクトリを `builtins/{lang}/pieces/` から `builtins/{lang}/workflows/` に移動。設定キーも `piece_categories` → `workflow_categories`、`enable_builtin_pieces` → `enable_builtin_workflows` にリネーム。旧キーは互換エイリアスとして引き続き使用可能 (#571, #561)
+- **BREAKING:** CLI オプション `-w, --piece` を `-w, --workflow` にリネーム。`--piece` はレガシーエイリアスとして使用可能 (#576)
+- **BREAKING:** ワークフロー YAML の `instruction_template` フィールドを削除。`instruction` フィールドを使用すること (#539)
+- `takt-default` ワークフローの `max_steps` を 50 に増加（`default` は 30 のまま）
+- 設定キーのエイリアス解決時に旧キーと新キーの両方が異なる値で存在する場合はエラーを発生させるよう変更
+
+### Fixed
+
+- Claude SDK のエラーペイロードが正しく処理されない問題を修正
+- ワークフロー用語の統一: CLI ヘルプ、エラーメッセージ、ドキュメントを `workflow` / `step` 用語に更新
+- ワークツリーモードで PR の Issue 解決がプロジェクト cwd から正しく行われるよう修正
+- Cursor Agent のヘッドレスワークツリー実行で `--trust` フラグが渡されるよう修正
+- ワークツリー環境下で `runtime.prepare` が設定されている場合にセルフホスト GitLab の `glab` CLI 認証が失敗する問題を修正 (#563)
+- ピースプロバイダー解決の統一化
+
+### Internal
+
+- Zod スキーマを `schemas.ts` から `schema-base.ts`・`workflow-schemas.ts`・`config-schemas.ts` に分割
+- 環境変数オーバーライドを spec ベースの宣言的定義にリファクタリング
+- レガシーの `step_provider`・`step_model` フィールドを削除
+- TeamLeader のパートタイムアウト処理を簡素化
+- `yaml` パッケージを v2.8.3 に更新
+- ドキュメント（README、CLI リファレンス、設定ガイド等）をワークフロー用語に全面更新
+
+## [0.33.2] - 2026-03-26
+
+### Added
+
+- 読み取り専用の監査ピースを追加: `audit-architecture`, `audit-architecture-frontend`, `audit-architecture-backend`, `audit-architecture-dual`, `audit-e2e`, `audit-unit`。コードを変更せずにモジュール境界やカバレッジギャップを列挙し、Issue 作成可能なレポートを出力
+
+### Changed
+
+- `security-audit` ピースを `audit-security` にリネーム（監査ピース群の命名規則を統一）
+- ビルトインピースカテゴリを再構成: 🧪 Testing カテゴリを廃止し、監査ピースを 🔍 Review カテゴリに統合
+- `fill-unit`, `fill-e2e` ピースを削除（`audit-unit`, `audit-e2e` に置き換え）
+
+### Fixed
+
+- GitLab セルフホスト環境で worktree（共有クローン）実行時に MR 作成が失敗するバグを修正。Git プロバイダーの `cwd` がクローンパスに正しく伝播するよう変更 (#552)
+
+### Internal
+
+- Git プロバイダーの `cwd` 伝播に関するテストカバレッジを追加
+- 設定ドキュメントから `verbose` オプションの記載を削除し、`logging.level` による設定方法に統一 (#543)
+
+## [0.33.1] - 2026-03-24
+
+### Changed
+
+- ファイナルレビューとセキュリティレビューのガードレールを強化: supervisor のファセット、セキュリティナレッジ、レビューポリシー・インストラクションを拡充
+
+### Fixed
+
+- GitLab セルフホスト環境で `gitlab.com` の認証がない場合にタスク完了後の MR 作成が必ず失敗するバグを修正。`glab auth status` がリモートのホスト名を指定して認証チェックするよう変更 (#545)
+
+### Internal
+
+- GitLab プロバイダーのテストカバレッジを拡充（セルフホスト環境の認証チェック、ホスト名ベースの CLI ステータス検証）
+
+## [0.33.0] - 2026-03-22
+
+### Added
+
+- GitLab VCS プロバイダーを追加: `glab` CLI を使った Issue 取得・マージリクエスト作成・レビューコメント取得に対応。git リモート URL からの自動検出をサポートし、`vcs_provider: gitlab` による明示的な設定も可能 (#512)
+- インタラクティブモード用プロバイダー設定 (`taktProviders.assistant`) を追加: ピース実行とは独立したプロバイダー/モデルをインタラクティブモードに指定可能 (#483)
+
+### Changed
+
+- BREAKING: ピース YAML の MCP サーバー設定をデフォルト拒否に変更。使用するには `pieceMcpServers` でトランスポート別に明示的に許可が必要 (#524)
+- BREAKING: ピース YAML の Arpeggio カスタムコード（カスタムデータソース、インライン JS、外部マージファイル）をデフォルト拒否に変更。使用するには `pieceArpeggio` で明示的に許可が必要 (#521)
+- BREAKING: ピース YAML の runtime prepare カスタムスクリプトをデフォルト拒否に変更（ビルトインプリセットは常に許可）。使用するには `pieceRuntimePrepare.customScripts: true` が必要 (#520)
+- BREAKING: sync conflict resolver の自動ツール承認をデフォルト拒否に変更。使用するには `syncConflictResolver.autoApproveTools: true` が必要 (#522)
+- team leader のタスク分解における最大ターン数を 4 → 5 に引き上げ (#511)
+- supervisor ファセットを強化: 要件カバレッジのエビデンスベース検証を追加
+- ペルソナファセットからクロスエージェント参照を除去し、ピース横断での再利用性を向上
+
+### Fixed
+
+- パイプラインモードで auto-commit の push 失敗時に PR 作成が無診断で失敗する問題を修正 (#532)
+- `.takt/.gitignore` のファセットパスが実際のディレクトリ構造と不一致だった問題を修正 (#535)
+- レビューピースの gather モードでブランチ検出が不正確だった問題を修正（完全一致を要求するよう変更） (#523)
+- レビューピースで reject findings のフォーマットが正しく処理されない問題を修正 (#528)
+- パイプラインモードでタスクブランチが PR 作成前に push されず、PR 作成が失敗する問題を修正
+
+### Internal
+
+- GitLab プロバイダーのテストカバレッジを追加（issue, pr, provider, utils）
+- VCS プロバイダーの自動検出・ファクトリ・フォーマットのテストカバレッジを追加
+- MCP サーバー・Arpeggio・runtime prepare・conflict resolver のデフォルト拒否に関するテストカバレッジを追加
+- ピースローダーのテストカバレッジを大幅に拡充
+- プロジェクト設定・グローバル設定のテストカバレッジを追加
+- MCP サーバーヘルパー、ポリシー正規化、conflict resolver ヘルパーのリファクタリング
+- ドキュメント更新（レビューピース名の修正、ビルトインカタログ更新）
+- ビルド/lint/テスト品質ゲートの追加と E2E テスト環境の CLAUDECODE 環境変数分離
+- テスト契約チェックのビルトインファセット強化（review-test, write-tests-first, testing-review）
+- タスク auto-PR の E2E テストを追加
+
 ## [0.32.2] - 2026-03-17
 
 ### Added
@@ -45,9 +302,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Internal
 
-- テスト系ピース・ファセットの全面整備（e2e-test → fill-e2e、unit-test → fill-unit にリネーム、ナレッジ・ポリシー追加）
+- テスト系ピース・ファセットの全面整備（e2e-test → audit-e2e、unit-test → audit-unit にリネーム、ナレッジ・ポリシー追加）
 - デザイン忠実度ポリシーの追加とフロントエンド系ピースへの統合
-- security-audit ピースの追加
+- audit-security ピースの追加
 - ファセットデプロイメントのリファクタリング（templates ディレクトリの廃止、facets ディレクトリへの統合） (#505)
 - `isPathInside` ユーティリティを追加し、クローン削除・worktree 再利用のパス検証を強化
 - ループモニターの閾値調整とレビューポリシーの改善

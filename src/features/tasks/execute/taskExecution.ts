@@ -2,101 +2,34 @@
  * Task execution logic
  */
 
-import { loadPieceByIdentifier, isPiecePath, resolveConfigValueWithSource, resolvePieceConfigValues } from '../../../infra/config/index.js';
-import { TaskRunner, type TaskInfo } from '../../../infra/task/index.js';
-import {
-  header,
-  info,
-  error,
-  status,
-  blankLine,
-} from '../../../shared/ui/index.js';
-import { createLogger, getErrorMessage, getSlackWebhookUrl, notifyError, notifySuccess, sendSlackNotification, buildSlackRunSummary } from '../../../shared/utils/index.js';
-import { getLabel } from '../../../shared/i18n/index.js';
-import { executePiece } from './pieceExecution.js';
-import type { TaskExecutionOptions, ExecuteTaskOptions, PieceExecutionResult } from './types.js';
-import { runWithWorkerPool } from './parallelExecution.js';
+import type { TaskRunner, TaskInfo } from '../../../infra/task/index.js';
+import { executeWorkflow } from './workflowExecution.js';
+import type {
+  TaskExecutionOptions,
+  ExecuteTaskOptions,
+  WorkflowExecutionResult,
+  TaskExecutionParallelOptions,
+} from './types.js';
 import { resolveTaskExecution, resolveTaskIssue } from './resolveTask.js';
 import { postExecutionFlow } from './postExecution.js';
-import { buildBooleanTaskResult, buildTaskResult, persistExceededTaskResult, persistTaskError, persistPrFailedTaskResult, persistTaskResult } from './taskResultHandler.js';
-import { generateRunId, toSlackTaskDetail } from './slackSummaryAdapter.js';
+import {
+  buildBooleanTaskResult,
+  buildTaskResult,
+  persistExceededTaskResult,
+  persistTaskError,
+  persistPrFailedTaskResult,
+  persistTaskResult,
+} from './taskResultHandler.js';
+import { executeTaskWorkflow } from './taskWorkflowExecution.js';
 
 export type { TaskExecutionOptions, ExecuteTaskOptions };
 
-const log = createLogger('task');
-
-type TaskExecutionParallelOptions = {
-  abortSignal?: AbortSignal;
-  taskPrefix?: string;
-  taskColorIndex?: number;
-  taskDisplayLabel?: string;
-};
-
-async function executeTaskWithResult(options: ExecuteTaskOptions): Promise<PieceExecutionResult> {
-  const {
-    task,
-    cwd,
-    pieceIdentifier,
-    projectCwd,
-    agentOverrides,
-    interactiveUserInput,
-    interactiveMetadata,
-    startMovement,
-    retryNote,
-    reportDirName,
-    abortSignal,
-    taskPrefix,
-    taskColorIndex,
-    taskDisplayLabel,
-    maxMovementsOverride,
-    initialIterationOverride,
-  } = options;
-  const pieceConfig = loadPieceByIdentifier(pieceIdentifier, projectCwd);
-
-  if (!pieceConfig) {
-    if (isPiecePath(pieceIdentifier)) {
-      error(`Piece file not found: ${pieceIdentifier}`);
-      return { success: false, reason: `Piece file not found: ${pieceIdentifier}` };
-    } else {
-      error(`Piece "${pieceIdentifier}" not found.`);
-      info('Available pieces are in ~/.takt/pieces/ or .takt/pieces/');
-      info('Specify a valid piece when creating tasks (e.g., via "takt add").');
-      return { success: false, reason: `Piece "${pieceIdentifier}" not found.` };
-    }
-  }
-
-  log.debug('Running piece', {
-    name: pieceConfig.name,
-    movements: pieceConfig.movements.map((s: { name: string }) => s.name),
-  });
-
-  const config = resolvePieceConfigValues(projectCwd, ['language', 'personaProviders', 'providerProfiles']);
-  const providerOptions = resolveConfigValueWithSource(projectCwd, 'providerOptions');
-  return await executePiece(pieceConfig, task, cwd, {
-    projectCwd,
-    language: config.language,
-    provider: agentOverrides?.provider,
-    model: agentOverrides?.model,
-    providerOptions: providerOptions.value,
-    providerOptionsSource: providerOptions.source === 'piece' ? 'global' : providerOptions.source,
-    personaProviders: config.personaProviders,
-    providerProfiles: config.providerProfiles,
-    interactiveUserInput,
-    interactiveMetadata,
-    startMovement,
-    retryNote,
-    reportDirName,
-    abortSignal,
-    taskPrefix,
-    taskColorIndex,
-    taskDisplayLabel,
-    maxMovementsOverride,
-    initialIterationOverride,
-  });
+export async function executeTaskWithResult(options: ExecuteTaskOptions): Promise<WorkflowExecutionResult> {
+  return executeTaskWorkflow(options, executeWorkflow);
 }
 
 /**
- * Execute a single task with piece.
+ * Execute a single task with workflow.
  */
 export async function executeTask(options: ExecuteTaskOptions): Promise<boolean> {
   const result = await executeTaskWithResult(options);
@@ -104,9 +37,9 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<boolean>
 }
 
 /**
- * Execute a task: resolve clone → run piece → auto-commit+push → remove clone → record completion.
+ * Execute a task: resolve clone → run workflow → auto-commit+push → remove clone → record completion.
  *
- * Shared by runAllTasks() and watchTasks() to avoid duplicated
+ * Shared by watch/list/retry flows to avoid duplicated
  * resolve → execute → autoCommit → complete logic.
  *
  * @returns true if the task succeeded
@@ -118,7 +51,26 @@ export async function executeAndCompleteTask(
   taskExecutionOptions?: TaskExecutionOptions,
   parallelOptions?: TaskExecutionParallelOptions,
 ): Promise<boolean> {
+  return executeTaskAndCompleteWithResult(
+    task,
+    taskRunner,
+    cwd,
+    executeTaskWithResult,
+    taskExecutionOptions,
+    parallelOptions,
+  );
+}
+
+export async function executeTaskAndCompleteWithResult(
+  task: TaskInfo,
+  taskRunner: TaskRunner,
+  cwd: string,
+  taskExecutor: (options: ExecuteTaskOptions) => Promise<WorkflowExecutionResult>,
+  taskExecutionOptions?: TaskExecutionOptions,
+  parallelOptions?: TaskExecutionParallelOptions,
+): Promise<boolean> {
   const startedAt = new Date().toISOString();
+  let taskForPersistence = task;
   const taskAbortController = new AbortController();
   const externalAbortSignal = parallelOptions?.abortSignal;
   const taskAbortSignal = externalAbortSignal ? taskAbortController.signal : undefined;
@@ -138,42 +90,56 @@ export async function executeAndCompleteTask(
   try {
     const {
       execCwd,
-      execPiece,
+      workflowIdentifier,
       isWorktree,
       taskPrompt,
       reportDirName,
       branch,
       worktreePath,
       baseBranch,
-      startMovement,
+      startStep,
       retryNote,
+      resumePoint,
       autoPr,
       draftPr,
+      shouldPublishBranchToOrigin,
       issueNumber,
-      maxMovementsOverride,
+      maxStepsOverride,
       initialIterationOverride,
     } = await resolveTaskExecution(task, cwd, taskAbortSignal);
 
-    // cwd is always the project root; pass it as projectCwd so reports/sessions go there
-    const taskRunResult = await executeTaskWithResult({
+    const executionTask = taskRunner.updateRunningTaskExecution(task.name, {
+      runSlug: reportDirName,
+      ...(worktreePath ? { worktreePath } : {}),
+      ...(branch ? { branch } : {}),
+    });
+    taskForPersistence = executionTask;
+
+    const projectRootCwd = cwd;
+    const taskRunResult = await taskExecutor({
       task: taskPrompt ?? task.content,
       cwd: execCwd,
-      pieceIdentifier: execPiece,
-      projectCwd: cwd,
+      workflowIdentifier,
+      projectCwd: projectRootCwd,
       agentOverrides: taskExecutionOptions,
-      startMovement,
+      startStep,
       retryNote,
+      resumePoint,
       reportDirName,
       abortSignal: taskAbortSignal,
       taskPrefix: parallelOptions?.taskPrefix,
       taskColorIndex: parallelOptions?.taskColorIndex,
       taskDisplayLabel: parallelOptions?.taskDisplayLabel,
-      maxMovementsOverride,
+      maxStepsOverride,
       initialIterationOverride,
+      currentTaskIssueNumber: issueNumber,
     });
 
     if (taskRunResult.exceeded && taskRunResult.exceededInfo) {
-      persistExceededTaskResult(taskRunner, task, taskRunResult.exceededInfo);
+      persistExceededTaskResult(taskRunner, executionTask, taskRunResult.exceededInfo, {
+        worktreePath,
+        branch,
+      });
       return false;
     }
 
@@ -184,16 +150,17 @@ export async function executeAndCompleteTask(
     let prFailedError: string | undefined;
     let postExecutionTaskError: string | undefined;
     if (taskSuccess && isWorktree) {
-      const issues = resolveTaskIssue(issueNumber);
+      const issues = resolveTaskIssue(issueNumber, projectRootCwd);
       const postResult = await postExecutionFlow({
         execCwd,
-        projectCwd: cwd,
+        projectCwd: projectRootCwd,
         task: task.name,
         branch,
         baseBranch,
         shouldCreatePr: autoPr,
+        shouldPublishBranchToOrigin,
         draftPr,
-        pieceIdentifier: execPiece,
+        workflowIdentifier,
         issues,
       });
       prUrl = postResult.prUrl;
@@ -207,21 +174,21 @@ export async function executeAndCompleteTask(
 
     if (postExecutionTaskError !== undefined) {
       const taskResult = buildBooleanTaskResult({
-        task,
+        task: executionTask,
         taskSuccess: false,
         startedAt,
         completedAt,
         successResponse: 'Task completed successfully',
         failureResponse: postExecutionTaskError,
-        branch,
         worktreePath,
+        branch,
       });
       persistTaskResult(taskRunner, taskResult);
       return false;
     }
 
     const taskResult = buildTaskResult({
-      task,
+      task: executionTask,
       runResult: taskRunResult,
       startedAt,
       completedAt,
@@ -236,114 +203,14 @@ export async function executeAndCompleteTask(
     }
 
     persistTaskResult(taskRunner, taskResult);
-
     return taskRunResult.success;
   } catch (err) {
     const completedAt = new Date().toISOString();
-    persistTaskError(taskRunner, task, startedAt, completedAt, err);
+    persistTaskError(taskRunner, taskForPersistence, startedAt, completedAt, err);
     return false;
   } finally {
     if (externalAbortSignal) {
       externalAbortSignal.removeEventListener('abort', onExternalAbort);
     }
-  }
-}
-
-/**
- * Run all pending tasks from .takt/tasks.yaml
- *
- * Uses a worker pool for both sequential (concurrency=1) and parallel
- * (concurrency>1) execution through the same code path.
- */
-export async function runAllTasks(
-  cwd: string,
-  options?: TaskExecutionOptions,
-): Promise<void> {
-  const taskRunner = new TaskRunner(cwd);
-  const globalConfig = resolvePieceConfigValues(
-    cwd,
-    ['notificationSound', 'notificationSoundEvents', 'concurrency', 'taskPollIntervalMs'],
-  );
-  const shouldNotifyRunComplete = globalConfig.notificationSound !== false
-    && globalConfig.notificationSoundEvents?.runComplete !== false;
-  const shouldNotifyRunAbort = globalConfig.notificationSound !== false
-    && globalConfig.notificationSoundEvents?.runAbort !== false;
-  const concurrency = globalConfig.concurrency;
-  const slackWebhookUrl = getSlackWebhookUrl();
-  const recovered = taskRunner.recoverInterruptedRunningTasks();
-  if (recovered > 0) {
-    info(`Recovered ${recovered} interrupted running task(s) to pending.`);
-  }
-
-  const initialTasks = taskRunner.claimNextTasks(concurrency);
-
-  if (initialTasks.length === 0) {
-    info('No pending tasks in .takt/tasks.yaml');
-    info('Use takt add to append tasks.');
-    return;
-  }
-
-  const runId = generateRunId();
-  const startTime = Date.now();
-
-  header('Running tasks');
-  if (concurrency > 1) {
-    info(`Concurrency: ${concurrency}`);
-  }
-
-  const sendSlackSummary = async (executedTaskNames: string[]): Promise<void> => {
-    if (!slackWebhookUrl) return;
-    const durationSec = Math.round((Date.now() - startTime) / 1000);
-    const executedSet = new Set(executedTaskNames);
-    const tasks = taskRunner.listAllTaskItems()
-      .filter((item) => executedSet.has(item.name))
-      .map(toSlackTaskDetail);
-    const successCount = tasks.filter((t) => t.success).length;
-    const message = buildSlackRunSummary({
-      runId,
-      total: tasks.length,
-      success: successCount,
-      failed: tasks.length - successCount,
-      durationSec,
-      concurrency,
-      tasks,
-    });
-    await sendSlackNotification(slackWebhookUrl, message);
-  };
-
-  try {
-    const result = await runWithWorkerPool(
-      taskRunner,
-      initialTasks,
-      concurrency,
-      cwd,
-      options,
-      globalConfig.taskPollIntervalMs,
-    );
-
-    const totalCount = result.success + result.fail;
-    blankLine();
-    header('Tasks Summary');
-    status('Total', String(totalCount));
-    status('Success', String(result.success), result.success === totalCount ? 'green' : undefined);
-    if (result.fail > 0) {
-      status('Failed', String(result.fail), 'red');
-      if (shouldNotifyRunAbort) {
-        notifyError('TAKT', getLabel('run.notifyAbort', undefined, { failed: String(result.fail) }));
-      }
-      await sendSlackSummary(result.executedTaskNames);
-      return;
-    }
-
-    if (shouldNotifyRunComplete) {
-      notifySuccess('TAKT', getLabel('run.notifyComplete', undefined, { total: String(totalCount) }));
-    }
-    await sendSlackSummary(result.executedTaskNames);
-  } catch (e) {
-    if (shouldNotifyRunAbort) {
-      notifyError('TAKT', getLabel('run.notifyAbort', undefined, { failed: getErrorMessage(e) }));
-    }
-    await sendSlackSummary([]);
-    throw e;
   }
 }

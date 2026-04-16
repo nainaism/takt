@@ -5,6 +5,7 @@ export interface TaskInfo {
   filePath: string;
   name: string;
   slug?: string;
+  runSlug?: string;
   content: string;
   taskDir?: string;
   createdAt: string;
@@ -18,7 +19,7 @@ export interface TaskResult {
   success: boolean;
   response: string;
   executionLog: string[];
-  failureMovement?: string;
+  failureStep?: string;
   failureLastMessage?: string;
   startedAt: string;
   completedAt: string;
@@ -66,6 +67,8 @@ export interface TaskListItem {
   filePath: string;
   content: string;
   summary?: string;
+  taskDir?: string;
+  runSlug?: string;
   branch?: string;
   worktreePath?: string;
   prUrl?: string;
@@ -75,6 +78,8 @@ export interface TaskListItem {
   completedAt?: string;
   ownerPid?: number;
   issueNumber?: number;
-  exceededMaxMovements?: number;
+  exceededMaxSteps?: number;
   exceededCurrentIteration?: number;
+  source?: 'pr_review' | 'issue' | 'manual';
+  prNumber?: number;
 }

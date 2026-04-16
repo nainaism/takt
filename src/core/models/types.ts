@@ -31,26 +31,45 @@ export type {
   TeamLeaderConfig,
 } from './part.js';
 
-// Piece configuration and runtime state
+// Workflow configuration and runtime state
 export type {
-  PieceRule,
+  WorkflowRule,
+  WorkflowStructuredOutput,
+  WorkflowSystemInput,
+  WorkflowEffect,
+  WorkflowEnqueueIssueConfig,
+  WorkflowEnqueueWorktreeConfig,
+  WorkflowTemplateReference,
+  WorkflowEffectScalarReference,
   OutputContractItem,
   OutputContractEntry,
   McpServerConfig,
   RuntimePreparePreset,
   RuntimePrepareEntry,
-  PieceRuntimeConfig,
-  MovementProviderOptions,
-  PieceMovement,
-  ArpeggioMovementConfig,
-  ArpeggioMergeMovementConfig,
+  WorkflowRuntimeConfig,
+  WorkflowStepKind,
+  WorkflowCallOverrides,
+  WorkflowParamType,
+  WorkflowParamFacetKind,
+  WorkflowCallArgValue,
+  WorkflowSubworkflowParamConfig,
+  WorkflowSubworkflowConfig,
+  WorkflowResumePointEntry,
+  WorkflowResumePoint,
+  StepProviderOptions,
+  AgentWorkflowStep,
+  SystemWorkflowStep,
+  WorkflowCallStep,
+  WorkflowStep,
+  ArpeggioStepConfig,
+  ArpeggioMergeStepConfig,
   LoopDetectionConfig,
   LoopMonitorConfig,
   LoopMonitorJudge,
   LoopMonitorRule,
-  PieceConfig,
-  PieceState,
-} from './piece-types.js';
+  WorkflowConfig,
+  WorkflowState,
+} from './workflow-types.js';
 
 
 // Provider permission profiles

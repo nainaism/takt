@@ -1,15 +1,22 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createLogger, isPathInside } from '../../shared/utils/index.js';
+import { createLogger, isRealPathInside } from '../../shared/utils/index.js';
 import { resolveConfigValue } from '../config/index.js';
 import type { WorktreeOptions, WorktreeResult } from './types.js';
-import { localBranchExists, remoteBranchExists, resolveBaseBranch as resolveBaseBranchInternal } from './clone-base-branch.js';
-import { cloneAndIsolate, resolveCloneSubmoduleOptions } from './clone-exec.js';
+import {
+  localBranchExists,
+  localBranchExistsAbortable,
+  remoteBranchExists,
+  remoteBranchExistsAbortable,
+  resolveBaseBranch as resolveBaseBranchInternal,
+  resolveBaseBranchAbortable,
+} from './clone-base-branch.js';
+import { cloneAndIsolate, cloneAndIsolateAbortable, resolveCloneSubmoduleOptions, runGitCommandAbortable } from './clone-exec.js';
 import { loadCloneMeta, removeCloneMeta as removeCloneMetaFile, saveCloneMeta as saveCloneMetaFile } from './clone-meta.js';
 
 export type { WorktreeOptions, WorktreeResult };
-export { branchExists } from './clone-base-branch.js';
+export { branchExists, localBranchExists, remoteBranchExists } from './clone-base-branch.js';
 
 const log = createLogger('clone');
 
@@ -100,14 +107,26 @@ export class CloneManager {
       { path: clonePath, branch }
     );
 
-    if (localBranchExists(projectDir, branch)) {
-      cloneAndIsolate(projectDir, clonePath, branch);
-    } else if (remoteBranchExists(projectDir, branch)) {
+    try {
+      execFileSync('git', ['fetch', 'origin', branch], {
+        cwd: projectDir,
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      log.info('Failed to prefetch branch from origin, continuing', {
+        branch,
+        error: String(err),
+      });
+    }
+
+    if (remoteBranchExists(projectDir, branch)) {
       cloneAndIsolate(projectDir, clonePath);
       execFileSync('git', ['fetch', projectDir, `refs/remotes/origin/${branch}:refs/heads/${branch}`], {
         cwd: clonePath, stdio: 'pipe',
       });
       execFileSync('git', ['checkout', branch], { cwd: clonePath, stdio: 'pipe' });
+    } else if (localBranchExists(projectDir, branch)) {
+      cloneAndIsolate(projectDir, clonePath, branch);
     } else {
       const { branch: baseBranch, fetchedCommit } = CloneManager.resolveBaseBranch(projectDir, options.baseBranch);
       cloneAndIsolate(projectDir, clonePath, baseBranch);
@@ -115,6 +134,58 @@ export class CloneManager {
         execFileSync('git', ['reset', '--hard', fetchedCommit], { cwd: clonePath, stdio: 'pipe' });
       }
       execFileSync('git', ['checkout', '-b', branch], { cwd: clonePath, stdio: 'pipe' });
+    }
+
+    this.saveCloneMeta(projectDir, branch, clonePath);
+    log.info('Clone created', { path: clonePath, branch });
+
+    return { path: clonePath, branch };
+  }
+
+  async createSharedCloneAbortable(
+    projectDir: string,
+    options: WorktreeOptions,
+    abortSignal?: AbortSignal,
+  ): Promise<WorktreeResult> {
+    const clonePath = CloneManager.resolveClonePath(projectDir, options);
+    const branch = CloneManager.resolveBranchName(options);
+    const cloneSubmoduleOptions = resolveCloneSubmoduleOptions(projectDir);
+
+    log.info(
+      `Creating shared clone (${cloneSubmoduleOptions.label}, targets: ${cloneSubmoduleOptions.targets})`,
+      { path: clonePath, branch },
+    );
+
+    try {
+      await runGitCommandAbortable(projectDir, ['fetch', 'origin', branch], abortSignal);
+    } catch (err) {
+      log.info('Failed to prefetch branch from origin, continuing', {
+        branch,
+        error: String(err),
+      });
+    }
+
+    if (await remoteBranchExistsAbortable(projectDir, branch, abortSignal)) {
+      await cloneAndIsolateAbortable(projectDir, clonePath, undefined, abortSignal);
+      await runGitCommandAbortable(
+        clonePath,
+        ['fetch', projectDir, `refs/remotes/origin/${branch}:refs/heads/${branch}`],
+        abortSignal,
+      );
+      await runGitCommandAbortable(clonePath, ['checkout', branch], abortSignal);
+    } else if (await localBranchExistsAbortable(projectDir, branch, abortSignal)) {
+      await cloneAndIsolateAbortable(projectDir, clonePath, branch, abortSignal);
+    } else {
+      const { branch: baseBranch, fetchedCommit } = await resolveBaseBranchAbortable(
+        projectDir,
+        options.baseBranch,
+        abortSignal,
+      );
+      await cloneAndIsolateAbortable(projectDir, clonePath, baseBranch, abortSignal);
+      if (fetchedCommit) {
+        await runGitCommandAbortable(clonePath, ['reset', '--hard', fetchedCommit], abortSignal);
+      }
+      await runGitCommandAbortable(clonePath, ['checkout', '-b', branch], abortSignal);
     }
 
     this.saveCloneMeta(projectDir, branch, clonePath);
@@ -165,7 +236,7 @@ export class CloneManager {
     }
     const cloneBaseDir = path.resolve(CloneManager.resolveCloneBaseDir(projectDir));
     const resolvedClonePath = path.resolve(meta.clonePath);
-    if (!isPathInside(cloneBaseDir, resolvedClonePath)) {
+    if (!isRealPathInside(cloneBaseDir, resolvedClonePath)) {
       log.error('Refusing to remove clone outside of clone base directory', {
         branch,
         clonePath: meta.clonePath,
@@ -185,6 +256,14 @@ const defaultManager = new CloneManager();
 
 export function createSharedClone(projectDir: string, options: WorktreeOptions): WorktreeResult {
   return defaultManager.createSharedClone(projectDir, options);
+}
+
+export function createSharedCloneAbortable(
+  projectDir: string,
+  options: WorktreeOptions,
+  abortSignal?: AbortSignal,
+): Promise<WorktreeResult> {
+  return defaultManager.createSharedCloneAbortable(projectDir, options, abortSignal);
 }
 
 export function createTempCloneForBranch(projectDir: string, branch: string): WorktreeResult {

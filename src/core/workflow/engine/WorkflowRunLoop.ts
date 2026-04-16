@@ -1,0 +1,306 @@
+import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
+import type { AgentResponse, LoopMonitorConfig, WorkflowState, WorkflowStep } from '../../models/types.js';
+import { ABORT_STEP, COMPLETE_STEP, ERROR_MESSAGES } from '../constants.js';
+import type {
+  RuntimeStepResolution,
+  StepProviderInfo,
+  WorkflowAbortKind,
+  WorkflowAbortResult,
+  WorkflowEngineOptions,
+  WorkflowRunResult,
+} from '../types.js';
+import type { WorkflowRuleTransition } from './transitions.js';
+import { incrementStepIteration } from './state-manager.js';
+import { handleBlocked } from './blocked-handler.js';
+import { isDelegatedWorkflowStep } from '../step-kind.js';
+
+const log = createLogger('workflow-run-loop');
+
+interface WorkflowRunLoopDeps {
+  state: WorkflowState;
+  options: WorkflowEngineOptions;
+  getMaxSteps: () => number;
+  abortRequested: () => boolean;
+  getStep: (name: string) => WorkflowStep;
+  applyRuntimeEnvironment: (stage: 'step') => void;
+  loopDetectorCheck: (stepName: string) => { shouldWarn?: boolean; shouldAbort?: boolean; count: number; isLoop: boolean };
+  cycleDetectorRecordAndCheck: (stepName: string) => { triggered: boolean; monitor?: LoopMonitorConfig; cycleCount: number };
+  resolveDoneTransition: (step: WorkflowStep, response: AgentResponse) => WorkflowRuleTransition;
+  runLoopMonitorJudge: (
+    monitor: LoopMonitorConfig,
+    cycleCount: number,
+    triggeringStep: WorkflowStep,
+    triggeringRuntime?: RuntimeStepResolution,
+  ) => Promise<string>;
+  runStep: (
+    step: WorkflowStep,
+    prebuiltInstruction?: string,
+    runtime?: RuntimeStepResolution,
+  ) => Promise<{ response: AgentResponse; instruction: string }>;
+  buildInstruction: (step: WorkflowStep, stepIteration: number) => string;
+  buildPhase1Instruction: (step: WorkflowStep, instruction: string) => string;
+  resolveStepProviderModel: (step: WorkflowStep, runtime?: RuntimeStepResolution) => StepProviderInfo;
+  resolveRuntimeForStep: (step: WorkflowStep) => RuntimeStepResolution | undefined;
+  setActiveStep: (step: WorkflowStep, iteration: number) => void;
+  addUserInput: (input: string) => void;
+  emit: (event: string, ...args: unknown[]) => void;
+  updateMaxSteps: (maxSteps: number) => void;
+}
+
+function advanceActiveStep(deps: WorkflowRunLoopDeps, nextStep: string, iteration: number): void {
+  const resolvedStep = deps.getStep(nextStep);
+  deps.state.currentStep = nextStep;
+  deps.setActiveStep(resolvedStep, iteration);
+}
+
+function abortWorkflow(
+  deps: WorkflowRunLoopDeps,
+  kind: WorkflowAbortKind,
+  reason: string,
+  options: { clearLastOutput?: boolean } = {},
+): WorkflowAbortResult {
+  deps.state.status = 'aborted';
+  if (options.clearLastOutput) {
+    deps.state.lastOutput = undefined;
+  }
+  deps.emit('workflow:abort', deps.state, reason);
+  return { kind, reason };
+}
+
+function requireNextStep(step: WorkflowStep, transition: WorkflowRuleTransition): string {
+  if (transition.nextStep) {
+    return transition.nextStep;
+  }
+  throw new Error(`Step "${step.name}" resolved to a return transition where a next step is required`);
+}
+
+export async function runWorkflowToCompletion(deps: WorkflowRunLoopDeps): Promise<WorkflowRunResult> {
+  let abort: WorkflowAbortResult | undefined;
+  let returnValue: string | undefined;
+
+  while (deps.state.status === 'running') {
+    if (deps.abortRequested()) {
+      abort = abortWorkflow(deps, 'interrupt', 'Workflow interrupted by user (SIGINT)');
+      break;
+    }
+
+    const maxSteps = deps.getMaxSteps();
+    if (deps.options.ignoreIterationLimit !== true && deps.state.iteration >= maxSteps) {
+      deps.emit('iteration:limit', deps.state.iteration, maxSteps);
+
+      if (deps.options.onIterationLimit) {
+        const additionalIterations = await deps.options.onIterationLimit({
+          currentIteration: deps.state.iteration,
+          maxSteps,
+          currentStep: deps.state.currentStep,
+        });
+        if (additionalIterations !== null && additionalIterations > 0) {
+          deps.updateMaxSteps(maxSteps + additionalIterations);
+          continue;
+        }
+      }
+
+      abort = abortWorkflow(deps, 'iteration_limit', ERROR_MESSAGES.MAX_STEPS_REACHED);
+      break;
+    }
+
+    const step = deps.getStep(deps.state.currentStep);
+    deps.applyRuntimeEnvironment('step');
+    const loopCheck = deps.loopDetectorCheck(step.name);
+
+    if (loopCheck.shouldWarn) {
+      deps.emit('step:loop_detected', step, loopCheck.count);
+    }
+    if (loopCheck.shouldAbort) {
+      abort = abortWorkflow(deps, 'loop_detected', ERROR_MESSAGES.LOOP_DETECTED(step.name, loopCheck.count));
+      break;
+    }
+
+    deps.state.iteration++;
+    const isDelegated = isDelegatedWorkflowStep(step);
+    const activeIteration = deps.state.iteration;
+    const stepRuntime = deps.resolveRuntimeForStep(step);
+    let prebuiltInstruction: string | undefined;
+    if (!isDelegated) {
+      const stepIteration = incrementStepIteration(deps.state, step.name);
+      prebuiltInstruction = deps.buildInstruction(step, stepIteration);
+    }
+    const stepInstruction = prebuiltInstruction
+      ? deps.buildPhase1Instruction(step, prebuiltInstruction)
+      : '';
+    deps.setActiveStep(step, activeIteration);
+    deps.emit('step:start', step, activeIteration, stepInstruction, deps.resolveStepProviderModel(step, stepRuntime));
+
+    try {
+      const { response, instruction } = await deps.runStep(step, prebuiltInstruction, stepRuntime);
+      deps.emit('step:complete', step, response, instruction);
+
+      if (response.status === 'blocked') {
+        deps.emit('step:blocked', step, response);
+        const result = await handleBlocked(step, response, deps.options);
+        if (result.shouldContinue && result.userInput) {
+          deps.addUserInput(result.userInput);
+          deps.emit('step:user_input', step, result.userInput);
+          continue;
+        }
+        abort = abortWorkflow(deps, 'blocked', 'Workflow blocked and no user input provided');
+        break;
+      }
+
+      if (response.status === 'error') {
+        abort = abortWorkflow(
+          deps,
+          'step_error',
+          `Step "${step.name}" failed: ${response.error ?? response.content}`,
+        );
+        break;
+      }
+
+      const transition = deps.resolveDoneTransition(step, response);
+      if (transition.requiresUserInput) {
+        if (!deps.options.onUserInput) {
+          abort = abortWorkflow(deps, 'user_input_required', 'User input required but no handler is configured');
+          break;
+        }
+        const userInput = await deps.options.onUserInput({ step, response, prompt: response.content });
+        if (userInput === null) {
+          abort = abortWorkflow(deps, 'user_input_cancelled', 'User input cancelled');
+          break;
+        }
+        deps.addUserInput(userInput);
+        deps.emit('step:user_input', step, userInput);
+        deps.state.currentStep = step.name;
+        continue;
+      }
+
+      if (transition.returnValue !== undefined) {
+        returnValue = transition.returnValue;
+        deps.state.status = 'completed';
+        deps.emit('workflow:complete', deps.state);
+        break;
+      }
+
+      let nextStep = requireNextStep(step, transition);
+      log.debug('Step transition', {
+        from: step.name,
+        status: response.status,
+        matchedRuleIndex: response.matchedRuleIndex,
+        nextStep,
+      });
+
+      const cycleCheck = deps.cycleDetectorRecordAndCheck(step.name);
+      if (cycleCheck.triggered && cycleCheck.monitor) {
+        log.info('Loop monitor cycle threshold reached', {
+          cycle: cycleCheck.monitor.cycle,
+          cycleCount: cycleCheck.cycleCount,
+          threshold: cycleCheck.monitor.threshold,
+        });
+        deps.emit('step:cycle_detected', cycleCheck.monitor, cycleCheck.cycleCount);
+        nextStep = await deps.runLoopMonitorJudge(cycleCheck.monitor, cycleCheck.cycleCount, step, stepRuntime);
+      }
+
+      if (nextStep === COMPLETE_STEP) {
+        deps.state.status = 'completed';
+        deps.emit('workflow:complete', deps.state);
+        break;
+      }
+      if (nextStep === ABORT_STEP) {
+        abort = abortWorkflow(deps, 'step_transition', 'Workflow aborted by step transition');
+        break;
+      }
+      advanceActiveStep(deps, nextStep, deps.state.iteration);
+    } catch (error) {
+      if (deps.abortRequested()) {
+        abort = abortWorkflow(deps, 'interrupt', 'Workflow interrupted by user (SIGINT)', {
+          clearLastOutput: true,
+        });
+      } else {
+        abort = abortWorkflow(
+          deps,
+          'runtime_error',
+          ERROR_MESSAGES.STEP_EXECUTION_FAILED(getErrorMessage(error)),
+          { clearLastOutput: true },
+        );
+      }
+      break;
+    }
+  }
+
+  return abort
+    ? { state: deps.state, abort }
+    : { state: deps.state, ...(returnValue !== undefined ? { returnValue } : {}) };
+}
+
+export async function runSingleWorkflowIteration(deps: WorkflowRunLoopDeps): Promise<{
+  response: AgentResponse;
+  nextStep: string;
+  isComplete: boolean;
+  loopDetected?: boolean;
+}> {
+  const step = deps.getStep(deps.state.currentStep);
+  deps.applyRuntimeEnvironment('step');
+  const loopCheck = deps.loopDetectorCheck(step.name);
+
+  if (loopCheck.shouldAbort) {
+    deps.state.status = 'aborted';
+    return {
+      response: {
+        persona: step.persona ?? step.name,
+        status: 'blocked',
+        content: ERROR_MESSAGES.LOOP_DETECTED(step.name, loopCheck.count),
+        timestamp: new Date(),
+      },
+      nextStep: ABORT_STEP,
+      isComplete: true,
+      loopDetected: true,
+    };
+  }
+
+  deps.state.iteration++;
+  deps.setActiveStep(step, deps.state.iteration);
+  const { response } = await deps.runStep(step);
+
+  if (response.status === 'blocked') {
+    deps.state.status = 'aborted';
+    deps.emit('workflow:abort', deps.state, 'Workflow blocked and no user input provided');
+    return { response, nextStep: ABORT_STEP, isComplete: true, loopDetected: loopCheck.isLoop };
+  }
+  if (response.status === 'error') {
+    deps.state.status = 'aborted';
+    deps.emit('workflow:abort', deps.state, `Step "${step.name}" failed: ${response.error ?? response.content}`);
+    return { response, nextStep: ABORT_STEP, isComplete: true, loopDetected: loopCheck.isLoop };
+  }
+
+  const transition = deps.resolveDoneTransition(step, response);
+  if (transition.requiresUserInput) {
+    if (!deps.options.onUserInput) {
+      deps.state.status = 'aborted';
+      return { response, nextStep: ABORT_STEP, isComplete: true, loopDetected: loopCheck.isLoop };
+    }
+    const userInput = await deps.options.onUserInput({ step, response, prompt: response.content });
+    if (userInput === null) {
+      deps.state.status = 'aborted';
+      return { response, nextStep: ABORT_STEP, isComplete: true, loopDetected: loopCheck.isLoop };
+    }
+    deps.addUserInput(userInput);
+    deps.emit('step:user_input', step, userInput);
+    deps.state.currentStep = step.name;
+    return { response, nextStep: step.name, isComplete: false, loopDetected: loopCheck.isLoop };
+  }
+
+  if (transition.returnValue !== undefined) {
+    deps.state.status = 'completed';
+    return { response, nextStep: COMPLETE_STEP, isComplete: true, loopDetected: loopCheck.isLoop };
+  }
+
+  const nextStep = requireNextStep(step, transition);
+  const isComplete = nextStep === COMPLETE_STEP || nextStep === ABORT_STEP;
+
+  if (!isComplete) {
+    advanceActiveStep(deps, nextStep, deps.state.iteration);
+  } else {
+    deps.state.status = nextStep === COMPLETE_STEP ? 'completed' : 'aborted';
+  }
+
+  return { response, nextStep, isComplete, loopDetected: loopCheck.isLoop };
+}

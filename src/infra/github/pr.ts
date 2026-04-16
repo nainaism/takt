@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
 import { checkGhCli } from './issue.js';
 import { MAX_PAGES } from '../git/constants.js';
-import type { CreatePrOptions, CreatePrResult, ExistingPr, CommentResult, PrReviewData, PrReviewComment } from '../git/types.js';
+import type { CreatePrOptions, CreatePrResult, ExistingPr, CommentResult, MergeResult, PrReviewData, PrReviewComment } from '../git/types.js';
 
 const log = createLogger('github-pr');
 
@@ -16,8 +16,8 @@ const log = createLogger('github-pr');
  * Find an open PR for the given branch.
  * Returns undefined if no PR exists.
  */
-export function findExistingPr(cwd: string, branch: string): ExistingPr | undefined {
-  const ghStatus = checkGhCli();
+export function findExistingPr(branch: string, cwd: string): ExistingPr | undefined {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) return undefined;
 
   try {
@@ -33,8 +33,8 @@ export function findExistingPr(cwd: string, branch: string): ExistingPr | undefi
   }
 }
 
-export function commentOnPr(cwd: string, prNumber: number, body: string): CommentResult {
-  const ghStatus = checkGhCli();
+export function commentOnPr(prNumber: number, body: string, cwd: string): CommentResult {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) {
     return { success: false, error: ghStatus.error };
   }
@@ -102,7 +102,7 @@ function normalizeReviewComment(raw: GhPrApiRawReviewComment): GhPrApiReviewComm
   };
 }
 
-function fetchInlineReviewComments(owner: string, repo: string, prNumber: number): GhPrApiReviewComment[] {
+function fetchInlineReviewComments(owner: string, repo: string, prNumber: number, cwd: string): GhPrApiReviewComment[] {
   const comments: GhPrApiReviewComment[] = [];
   let page = 1;
 
@@ -110,7 +110,7 @@ function fetchInlineReviewComments(owner: string, repo: string, prNumber: number
     const rawInlineReviewComments = execFileSync(
       'gh',
       ['api', `/repos/${owner}/${repo}/pulls/${prNumber}/comments?per_page=${INLINE_REVIEW_COMMENTS_PER_PAGE}&page=${page}`],
-      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+      { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     const parsed = JSON.parse(rawInlineReviewComments) as GhPrApiRawReviewComment[];
     const normalized = parsed.map(normalizeReviewComment);
@@ -147,19 +147,19 @@ function parseRepositoryFromPrUrl(prUrl: string): { owner: string; repo: string 
  * Fetch PR review comments and metadata via `gh pr view`.
  * Throws on failure (PR not found, network error, etc.).
  */
-export function fetchPrReviewComments(prNumber: number): PrReviewData {
+export function fetchPrReviewComments(prNumber: number, cwd: string): PrReviewData {
   log.debug('Fetching PR review comments', { prNumber });
 
   const raw = execFileSync(
     'gh',
     ['pr', 'view', String(prNumber), '--json', PR_REVIEW_JSON_FIELDS],
-    { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
   );
 
   const data = JSON.parse(raw) as GhPrViewReviewResponse;
   const { owner, repo } = parseRepositoryFromPrUrl(data.url);
 
-  const inlineReviewComments = fetchInlineReviewComments(owner, repo, prNumber);
+  const inlineReviewComments = fetchInlineReviewComments(owner, repo, prNumber, cwd);
 
   const comments: PrReviewComment[] = data.comments.map((c) => ({
     author: c.author.login,
@@ -194,8 +194,8 @@ export function fetchPrReviewComments(prNumber: number): PrReviewData {
   };
 }
 
-export function createPullRequest(cwd: string, options: CreatePrOptions): CreatePrResult {
-  const ghStatus = checkGhCli();
+export function createPullRequest(options: CreatePrOptions, cwd: string): CreatePrResult {
+  const ghStatus = checkGhCli(cwd);
   if (!ghStatus.available) {
     return { success: false, error: ghStatus.error };
   }
@@ -235,6 +235,26 @@ export function createPullRequest(cwd: string, options: CreatePrOptions): Create
   } catch (err) {
     const errorMessage = getErrorMessage(err);
     log.error('PR creation failed', { error: errorMessage });
+    return { success: false, error: errorMessage };
+  }
+}
+
+export function mergePr(prNumber: number, cwd: string): MergeResult {
+  const ghStatus = checkGhCli(cwd);
+  if (!ghStatus.available) {
+    return { success: false, error: ghStatus.error };
+  }
+
+  try {
+    execFileSync('gh', ['pr', 'merge', String(prNumber), '--merge', '--delete-branch'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { success: true };
+  } catch (err) {
+    const errorMessage = getErrorMessage(err);
+    log.error('PR merge failed', { error: errorMessage });
     return { success: false, error: errorMessage };
   }
 }

@@ -23,6 +23,12 @@ export { BranchManager } from './branchList.js';
 export { TaskRunner } from './runner.js';
 
 export { showTaskList } from './display.js';
+export {
+  serializeTaskListItemForJson,
+  type JsonTaskData,
+  type JsonTaskFailure,
+  type JsonTaskListItem,
+} from './listSerializer.js';
 
 export {
   TaskFileSchema,
@@ -36,9 +42,12 @@ export {
   type TaskRecord,
   TasksFileSchema,
   type TasksFileData,
+  resolveTaskWorkflowValue,
+  resolveTaskStartStepValue,
 } from './schema.js';
 export {
   createSharedClone,
+  createSharedCloneAbortable,
   removeClone,
   createTempCloneForBranch,
   saveCloneMeta,
@@ -47,6 +56,8 @@ export {
   resolveBaseBranch,
   resolveCloneBaseDir,
   branchExists,
+  localBranchExists,
+  remoteBranchExists,
 } from './clone.js';
 export {
   detectDefaultBranch,
@@ -57,7 +68,7 @@ export {
   getOriginalInstruction,
   buildListItems,
 } from './branchList.js';
-export { stageAndCommit, getCurrentBranch, pushBranch, checkoutBranch } from './git.js';
+export { stageAndCommit, getCurrentBranch, pushBranch, checkoutBranch, relayPushCloneToOrigin, materializeCloneHeadToRootBranch } from './git.js';
 export { buildTaskInstruction } from './instruction.js';
 export { autoCommitAndPush, type AutoCommitResult } from './autoCommit.js';
 export { summarizeTaskName } from './summarize.js';

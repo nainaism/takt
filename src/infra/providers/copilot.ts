@@ -26,6 +26,7 @@ function toCopilotOptions(options: ProviderCallOptions): CopilotCallOptions {
     abortSignal: options.abortSignal,
     sessionId: options.sessionId,
     model: options.model,
+    effort: options.providerOptions?.copilot?.effort,
     permissionMode: options.permissionMode,
     onStream: options.onStream,
     copilotGithubToken: options.copilotGithubToken ?? resolveCopilotGithubToken(),
@@ -35,14 +36,9 @@ function toCopilotOptions(options: ProviderCallOptions): CopilotCallOptions {
 
 /** Copilot provider — delegates to GitHub Copilot CLI */
 export class CopilotProvider implements Provider {
-  setup(config: AgentSetup): ProviderAgent {
-    if (config.claudeAgent) {
-      throw new Error('Claude Code agent calls are not supported by the Copilot provider');
-    }
-    if (config.claudeSkill) {
-      throw new Error('Claude Code skill calls are not supported by the Copilot provider');
-    }
+  readonly supportsStructuredOutput = false;
 
+  setup(config: AgentSetup): ProviderAgent {
     const { name, systemPrompt } = config;
     if (systemPrompt) {
       return {

@@ -29,14 +29,9 @@ function toOpenCodeOptions(options: ProviderCallOptions): OpenCodeCallOptions {
 
 /** OpenCode provider — delegates to OpenCode SDK */
 export class OpenCodeProvider implements Provider {
-  setup(config: AgentSetup): ProviderAgent {
-    if (config.claudeAgent) {
-      throw new Error('Claude Code agent calls are not supported by the OpenCode provider');
-    }
-    if (config.claudeSkill) {
-      throw new Error('Claude Code skill calls are not supported by the OpenCode provider');
-    }
+  readonly supportsStructuredOutput = true;
 
+  setup(config: AgentSetup): ProviderAgent {
     const { name, systemPrompt } = config;
     if (systemPrompt) {
       return {

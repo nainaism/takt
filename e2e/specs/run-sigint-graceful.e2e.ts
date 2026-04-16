@@ -9,41 +9,10 @@ import {
   type IsolatedEnv,
 } from '../helpers/isolated-env';
 import { createTestRepo, type TestRepo } from '../helpers/test-repo';
+import { waitFor, waitForClose } from '../helpers/wait.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-async function waitFor(
-  predicate: () => boolean,
-  timeoutMs: number,
-  intervalMs: number = 100,
-): Promise<boolean> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (predicate()) {
-      return true;
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, intervalMs));
-  }
-  return false;
-}
-
-async function waitForClose(
-  child: ReturnType<typeof spawn>,
-  timeoutMs: number,
-): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      rejectPromise(new Error(`Process did not exit within ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      resolvePromise({ code, signal });
-    });
-  });
-}
 
 // E2E更新時は docs/testing/e2e.md も更新すること
 describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
@@ -77,7 +46,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
 
   it('should stop scheduling new clone work after SIGINT and exit cleanly', async () => {
     const binPath = resolve(__dirname, '../../bin/takt');
-    const piecePath = resolve(__dirname, '../fixtures/pieces/mock-slow-multi-step.yaml');
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-slow-multi-step.yaml');
     const scenarioPath = resolve(__dirname, '../fixtures/scenarios/run-sigint-parallel.json');
 
     const tasksFile = join(testRepo.path, '.takt', 'tasks.yaml');
@@ -91,7 +60,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-a',
         '    status: pending',
         '    content: "E2E SIGINT task A"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -100,7 +69,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-b',
         '    status: pending',
         '    content: "E2E SIGINT task B"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -109,7 +78,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-c',
         '    status: pending',
         '    content: "E2E SIGINT task C"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -159,7 +128,6 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
 
     const afterSummary = stdout.slice(summaryIndex);
     expect(afterSummary).not.toContain('=== Task:');
-    expect(afterSummary).not.toContain('=== Running Piece:');
     expect(afterSummary).not.toContain('Creating clone...');
 
     const finalTasksYaml = readFileSync(tasksFile, 'utf-8');
@@ -174,7 +142,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
 
   it('should force exit immediately on second SIGINT', async () => {
     const binPath = resolve(__dirname, '../../bin/takt');
-    const piecePath = resolve(__dirname, '../fixtures/pieces/mock-slow-multi-step.yaml');
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-slow-multi-step.yaml');
     const scenarioPath = resolve(__dirname, '../fixtures/scenarios/run-sigint-parallel.json');
 
     const tasksFile = join(testRepo.path, '.takt', 'tasks.yaml');
@@ -188,7 +156,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-a',
         '    status: pending',
         '    content: "E2E SIGINT task A"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -197,7 +165,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-b',
         '    status: pending',
         '    content: "E2E SIGINT task B"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -206,7 +174,7 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
         '  - name: sigint-c',
         '    status: pending',
         '    content: "E2E SIGINT task C"',
-        `    piece: "${piecePath}"`,
+        `    workflow: "${workflowPath}"`,
         '    worktree: true',
         `    created_at: "${now}"`,
         '    started_at: null',
@@ -255,5 +223,89 @@ describe('E2E: Run tasks graceful shutdown on SIGINT (parallel)', () => {
     if (stderr.trim().length > 0) {
       expect(stderr).not.toContain('UnhandledPromiseRejection');
     }
+  }, 120_000);
+
+  it('should exit promptly when external SIGINT arrives during clone creation', async () => {
+    const binPath = resolve(__dirname, '../../bin/takt');
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-slow-multi-step.yaml');
+    const scenarioPath = resolve(__dirname, '../fixtures/scenarios/run-sigint-parallel.json');
+
+    const tasksFile = join(testRepo.path, '.takt', 'tasks.yaml');
+    mkdirSync(join(testRepo.path, '.takt'), { recursive: true });
+
+    const now = new Date().toISOString();
+    writeFileSync(
+      tasksFile,
+      [
+        'tasks:',
+        '  - name: sigint-a',
+        '    status: pending',
+        '    content: "E2E SIGINT clone task A"',
+        `    workflow: "${workflowPath}"`,
+        '    worktree: true',
+        `    created_at: "${now}"`,
+        '    started_at: null',
+        '    completed_at: null',
+        '    owner_pid: null',
+        '  - name: sigint-b',
+        '    status: pending',
+        '    content: "E2E SIGINT clone task B"',
+        `    workflow: "${workflowPath}"`,
+        '    worktree: true',
+        `    created_at: "${now}"`,
+        '    started_at: null',
+        '    completed_at: null',
+        '    owner_pid: null',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const child = spawn('node', [binPath, 'run', '--provider', 'mock'], {
+      cwd: testRepo.path,
+      env: {
+        ...isolatedEnv.env,
+        TAKT_MOCK_SCENARIO: scenarioPath,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    const cloneStarted = await waitFor(() => {
+      return stdout.includes('Creating clone...')
+        || stdout.includes('Creating shared clone');
+    }, 30_000, 20);
+    expect(cloneStarted, `stdout:\n${stdout}\n\nstderr:\n${stderr}`).toBe(true);
+
+    const startedAt = Date.now();
+    const exitResultPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null; elapsed: number }>((resolve) => {
+      child.once('exit', (code, signal) => {
+        resolve({ code, signal, elapsed: Date.now() - startedAt });
+      });
+    });
+    const closeResultPromise = waitForClose(child, 15_000);
+
+    child.kill('SIGINT');
+
+    const exitResult = await exitResultPromise;
+    const closeResult = await closeResultPromise;
+    const closeElapsed = Date.now() - startedAt;
+
+    expect(
+      exitResult.signal === 'SIGINT' || exitResult.code === 130 || exitResult.code === 0,
+      `unexpected exit: code=${exitResult.code}, signal=${exitResult.signal}, stdout:\n${stdout}\n\nstderr:\n${stderr}`,
+    ).toBe(true);
+    expect(
+      exitResult.elapsed,
+      `Process exit took ${exitResult.elapsed}ms after clone-time SIGINT. close=${closeElapsed}ms code=${closeResult.code} signal=${closeResult.signal}`,
+    ).toBeLessThan(5_000);
+    expect(stdout).not.toContain('=== Running Workflow:');
   }, 120_000);
 });

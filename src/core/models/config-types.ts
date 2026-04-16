@@ -7,22 +7,23 @@
  *   LoadedConfig   — resolved values with NonNullable defaults (defined in resolvedConfig.ts)
  */
 
-import type { MovementProviderOptions, PieceRuntimeConfig } from './piece-types.js';
+import type { ProviderType } from '../../shared/types/provider.js';
+import type { StepProviderOptions, WorkflowRuntimeConfig } from './workflow-types.js';
 import type { ProviderPermissionProfiles } from './provider-profiles.js';
 import type { VcsProviderType } from './vcs-types.js';
 
 export interface PersonaProviderEntry {
-  provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  provider?: ProviderType;
   model?: string;
 }
 
 export interface TaktProviderEntry {
-  provider: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  provider: ProviderType;
   model?: string;
 }
 
 export type TaktProviderModelOnlyEntry = {
-  provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  provider?: ProviderType;
   model: string;
 };
 
@@ -32,21 +33,21 @@ export interface TaktProvidersConfig {
   assistant: TaktProviderConfigEntry;
 }
 
-/** Movement-specific quality gates override */
-export interface MovementQualityGatesOverride {
+/** Step-specific quality gates override */
+export interface StepQualityGatesOverride {
   qualityGates?: string[];
 }
 
-/** Piece-level overrides (quality_gates, etc.) */
-export interface PieceOverrides {
-  /** Global quality gates applied to all movements */
+/** Workflow-level overrides (quality_gates, etc.) */
+export interface WorkflowOverrides {
+  /** Global quality gates applied to all steps */
   qualityGates?: string[];
-  /** Whether to apply quality_gates only to edit: true movements */
+  /** Whether to apply quality_gates only to edit: true steps */
   qualityGatesEditOnly?: boolean;
-  /** Movement-specific quality gates overrides */
-  movements?: Record<string, MovementQualityGatesOverride>;
+  /** Step-specific quality gates overrides */
+  steps?: Record<string, StepQualityGatesOverride>;
   /** Persona-specific quality gates overrides */
-  personas?: Record<string, MovementQualityGatesOverride>;
+  personas?: Record<string, StepQualityGatesOverride>;
 }
 
 /** Custom agent configuration */
@@ -55,8 +56,6 @@ export interface CustomAgentConfig {
   promptFile?: string;
   prompt?: string;
   allowedTools?: string[];
-  claudeAgent?: string;
-  claudeSkill?: string;
 }
 
 /** Logging configuration for runtime output */
@@ -99,19 +98,19 @@ export interface PipelineConfig {
   prBodyTemplate?: string;
 }
 
-/** Piece-level runtime.prepare policy */
-export interface PieceRuntimePrepareConfig {
-  /** Allow custom script paths from piece YAML (default: false) */
+/** Workflow-level runtime.prepare policy */
+export interface WorkflowRuntimePrepareConfig {
+  /** Allow custom script paths from workflow YAML (default: false) */
   customScripts?: boolean;
 }
 
-/** Piece-level Arpeggio custom capability policy */
-export interface PieceArpeggioConfig {
-  /** Allow non-builtin Arpeggio data sources from piece YAML (default: false) */
+/** Workflow-level Arpeggio custom capability policy */
+export interface WorkflowArpeggioConfig {
+  /** Allow non-builtin Arpeggio data sources from workflow YAML (default: false) */
   customDataSourceModules?: boolean;
-  /** Allow inline JS custom merge functions from piece YAML (default: false) */
+  /** Allow inline JS custom merge functions from workflow YAML (default: false) */
   customMergeInlineJs?: boolean;
-  /** Allow external JS custom merge files from piece YAML (default: false) */
+  /** Allow external JS custom merge files from workflow YAML (default: false) */
   customMergeFiles?: boolean;
 }
 
@@ -121,13 +120,13 @@ export interface SyncConflictResolverConfig {
   autoApproveTools?: boolean;
 }
 
-/** Piece-level MCP transport policy */
-export interface PieceMcpServersConfig {
-  /** Allow stdio MCP servers from piece YAML (default: false) */
+/** Workflow-level MCP transport policy */
+export interface WorkflowMcpServersConfig {
+  /** Allow stdio MCP servers from workflow YAML (default: false) */
   stdio?: boolean;
-  /** Allow SSE MCP servers from piece YAML (default: false) */
+  /** Allow SSE MCP servers from workflow YAML (default: false) */
   sse?: boolean;
-  /** Allow HTTP MCP servers from piece YAML (default: false) */
+  /** Allow HTTP MCP servers from workflow YAML (default: false) */
   http?: boolean;
 }
 
@@ -136,10 +135,10 @@ export interface PieceMcpServersConfig {
 export interface NotificationSoundEventsConfig {
   /** Warning when iteration limit is reached */
   iterationLimit?: boolean;
-  /** Success notification when piece execution completes */
-  pieceComplete?: boolean;
-  /** Error notification when piece execution aborts */
-  pieceAbort?: boolean;
+  /** Success notification when workflow execution completes */
+  workflowComplete?: boolean;
+  /** Error notification when workflow execution aborts */
+  workflowAbort?: boolean;
   /** Success notification when runAllTasks finishes without failures */
   runComplete?: boolean;
   /** Error notification when runAllTasks finishes with failures or aborts */
@@ -150,8 +149,10 @@ export interface NotificationSoundEventsConfig {
  * Project-level configuration stored in .takt/config.yaml.
  */
 export interface ProjectConfig {
+  /** UI / builtin resource language override for this project */
+  language?: Language;
   /** Provider selection for agent runtime */
-  provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  provider?: ProviderType;
   /** Model selection for agent runtime */
   model?: string;
   /** Allow git hooks during TAKT-managed auto-commit */
@@ -184,26 +185,26 @@ export interface ProjectConfig {
   concurrency?: number;
   /** Polling interval in ms for task pickup */
   taskPollIntervalMs?: number;
-  /** Number of movement previews in interactive mode */
-  interactivePreviewMovements?: number;
+  /** Number of step previews in interactive mode */
+  interactivePreviewSteps?: number;
   /** Project-level analytics overrides */
   analytics?: AnalyticsConfig;
-  /** Provider-specific options (overrides global, overridden by piece/movement) */
-  providerOptions?: MovementProviderOptions;
+  /** Provider-specific options (overrides global, overridden by workflow/step) */
+  providerOptions?: StepProviderOptions;
   /** Provider-specific permission profiles (project-level override) */
   providerProfiles?: ProviderPermissionProfiles;
-  /** Piece-level overrides (quality_gates, etc.) */
-  pieceOverrides?: PieceOverrides;
+  /** Workflow-level overrides (quality_gates, etc.) */
+  workflowOverrides?: WorkflowOverrides;
   /** Runtime environment configuration (project-level override) */
-  runtime?: PieceRuntimeConfig;
-  /** Piece-level runtime.prepare policy */
-  pieceRuntimePrepare?: PieceRuntimePrepareConfig;
-  /** Piece-level Arpeggio policy */
-  pieceArpeggio?: PieceArpeggioConfig;
+  runtime?: WorkflowRuntimeConfig;
+  /** Workflow-level runtime.prepare policy */
+  workflowRuntimePrepare?: WorkflowRuntimePrepareConfig;
+  /** Workflow-level Arpeggio policy */
+  workflowArpeggio?: WorkflowArpeggioConfig;
   /** Sync conflict resolver behavior */
   syncConflictResolver?: SyncConflictResolverConfig;
-  /** Piece-level MCP transport policy */
-  pieceMcpServers?: PieceMcpServersConfig;
+  /** Workflow-level MCP transport policy */
+  workflowMcpServers?: WorkflowMcpServersConfig;
 }
 
 /**
@@ -222,11 +223,11 @@ export interface GlobalConfig extends Omit<ProjectConfig, 'submodules' | 'withSu
   /** Directory for shared clones (worktree_dir in config). If empty, uses ../{clone-name} relative to project */
   worktreeDir?: string;
   /** @globalOnly */
-  /** List of builtin piece/agent names to exclude from fallback loading */
+  /** List of builtin workflow/agent names to exclude from fallback loading */
   disabledBuiltins?: string[];
   /** @globalOnly */
-  /** Enable builtin pieces from builtins/{lang}/pieces */
-  enableBuiltinPieces?: boolean;
+  /** Enable builtin workflows from builtins/{lang}/workflows */
+  enableBuiltinWorkflows?: boolean;
   /** @globalOnly */
   /** Anthropic API key for Claude Code SDK (overridden by TAKT_ANTHROPIC_API_KEY env var) */
   anthropicApiKey?: string;
@@ -270,8 +271,11 @@ export interface GlobalConfig extends Omit<ProjectConfig, 'submodules' | 'withSu
   /** Path to bookmarks file (default: ~/.takt/preferences/bookmarks.yaml) */
   bookmarksFile?: string;
   /** @globalOnly */
-  /** Path to piece categories file (default: ~/.takt/preferences/piece-categories.yaml) */
-  pieceCategoriesFile?: string;
+  /**
+   * User categories overlay path (default: ~/.takt/preferences/workflow-categories.yaml).
+   * Builtin defaults: builtins/{lang}/workflow-categories.yaml (canonical keys: `workflow_categories` / `workflows`).
+   */
+  workflowCategoriesFile?: string;
   /** @globalOnly */
   /** Prevent macOS idle sleep during takt execution using caffeinate (default: false) */
   preventSleep?: boolean;

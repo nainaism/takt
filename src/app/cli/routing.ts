@@ -2,7 +2,7 @@ import { info, success, error as logError } from '../../shared/ui/index.js';
 import { getErrorMessage } from '../../shared/utils/index.js';
 import { getLabel } from '../../shared/i18n/index.js';
 import { checkoutBranch } from '../../infra/task/index.js';
-import { selectAndExecuteTask, determinePiece, saveTaskFromInteractive, createIssueAndSaveTask, promptLabelSelection, type SelectAndExecuteOptions } from '../../features/tasks/index.js';
+import { selectAndExecuteTask, determineWorkflow, saveTaskFromInteractive, createIssueAndSaveTask, promptLabelSelection, type SelectAndExecuteOptions } from '../../features/tasks/index.js';
 import { executePipeline } from '../../features/pipeline/index.js';
 import {
   interactiveMode,
@@ -15,7 +15,7 @@ import {
   type InteractiveModeResult,
 } from '../../features/interactive/index.js';
 import {
-  getPieceDescription,
+  getWorkflowDescription,
   resolveConfigValue,
   resolveConfigValues,
   loadPersonaSessions,
@@ -24,9 +24,10 @@ import { resolvePersonaSessionId } from '../../infra/config/project/sessionStore
 import { resolveAssistantProviderModelFromConfig } from '../../core/config/provider-resolution.js';
 import { resolveAssistantConfigLayers } from '../../features/interactive/assistantConfig.js';
 import { program, resolvedCwd, pipelineMode } from './program.js';
-import { resolveAgentOverrides } from './helpers.js';
+import { resolveAgentOverrides, resolveWorkflowCliOption } from './helpers.js';
 import { loadTaskHistory } from './taskHistory.js';
 import { resolveIssueInput, resolvePrInput } from './routing-inputs.js';
+
 export async function executeDefaultAction(task?: string): Promise<void> {
   const opts = program.opts();
   if (!pipelineMode && (opts.autoPr === true || opts.draft === true)) {
@@ -46,9 +47,16 @@ export async function executeDefaultAction(task?: string): Promise<void> {
     process.exit(1);
   }
   const agentOverrides = resolveAgentOverrides(program);
-  const resolvedPipelinePiece = opts.piece as string | undefined;
-  if (pipelineMode && resolvedPipelinePiece === undefined) {
-    logError('--piece (-w) is required in pipeline mode');
+  let resolvedWorkflow: string | undefined;
+  try {
+    resolvedWorkflow = resolveWorkflowCliOption(opts as Record<string, unknown>);
+  } catch (error) {
+    logError(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  const resolvedPipelineWorkflow = resolvedWorkflow;
+  if (pipelineMode && resolvedPipelineWorkflow === undefined) {
+    logError('--workflow (-w) is required in pipeline mode');
     process.exit(1);
   }
   const resolvedPipelineAutoPr = opts.autoPr === true
@@ -58,7 +66,7 @@ export async function executeDefaultAction(task?: string): Promise<void> {
     ? true
     : (resolveConfigValue(resolvedCwd, 'draftPr') ?? false);
   const selectOptions: SelectAndExecuteOptions = {
-    piece: opts.piece as string | undefined,
+    workflow: resolvedWorkflow,
   };
 
   if (pipelineMode) {
@@ -66,7 +74,7 @@ export async function executeDefaultAction(task?: string): Promise<void> {
       issueNumber,
       prNumber,
       task: opts.task as string | undefined,
-      piece: resolvedPipelinePiece!,
+      workflow: resolvedPipelineWorkflow!,
       branch: opts.branch as string | undefined,
       autoPr: resolvedPipelineAutoPr,
       draftPr: resolvedPipelineDraftPr,
@@ -118,30 +126,30 @@ export async function executeDefaultAction(task?: string): Promise<void> {
 
   const globalConfig = resolveConfigValues(
     resolvedCwd,
-    ['language', 'interactivePreviewMovements'],
+    ['language', 'interactivePreviewSteps'],
   );
   const lang = resolveLanguage(globalConfig.language);
 
-  const pieceId = await determinePiece(resolvedCwd, selectOptions.piece);
-  if (pieceId === null) {
+  const workflowId = await determineWorkflow(resolvedCwd, selectOptions.workflow);
+  if (workflowId === null) {
     info(getLabel('interactive.ui.cancelled', lang));
     return;
   }
 
-  const previewCount = globalConfig.interactivePreviewMovements;
-  const pieceDesc = getPieceDescription(pieceId, resolvedCwd, previewCount);
+  const previewCount = globalConfig.interactivePreviewSteps;
+  const workflowDesc = getWorkflowDescription(workflowId, resolvedCwd, previewCount);
 
-  const selectedMode = await selectInteractiveMode(lang, pieceDesc.interactiveMode);
+  const selectedMode = await selectInteractiveMode(lang, workflowDesc.interactiveMode);
   if (selectedMode === null) {
     info(getLabel('interactive.ui.cancelled', lang));
     return;
   }
 
-  const pieceContext = {
-    name: pieceDesc.name,
-    description: pieceDesc.description,
-    pieceStructure: pieceDesc.pieceStructure,
-    movementPreviews: pieceDesc.movementPreviews,
+  const workflowContext = {
+    name: workflowDesc.name,
+    description: workflowDesc.description,
+    workflowStructure: workflowDesc.workflowStructure,
+    stepPreviews: workflowDesc.stepPreviews,
     taskHistory: loadTaskHistory(resolvedCwd, lang),
   };
 
@@ -178,7 +186,7 @@ export async function executeDefaultAction(task?: string): Promise<void> {
       result = await interactiveMode(
         resolvedCwd,
         initialInput,
-        pieceContext,
+        workflowContext,
         selectedSessionId,
         undefined,
         Object.keys(assistantModeOptions).length > 0 ? assistantModeOptions : undefined,
@@ -191,15 +199,15 @@ export async function executeDefaultAction(task?: string): Promise<void> {
       break;
 
     case 'quiet':
-      result = await quietMode(resolvedCwd, initialInput, pieceContext);
+      result = await quietMode(resolvedCwd, initialInput, workflowContext);
       break;
 
     case 'persona': {
-      if (!pieceDesc.firstMovement) {
+      if (!workflowDesc.firstStep) {
         info(getLabel('interactive.ui.personaFallback', lang));
-        result = await interactiveMode(resolvedCwd, initialInput, pieceContext);
+        result = await interactiveMode(resolvedCwd, initialInput, workflowContext);
       } else {
-        result = await personaMode(resolvedCwd, pieceDesc.firstMovement, initialInput, pieceContext);
+        result = await personaMode(resolvedCwd, workflowDesc.firstStep, initialInput, workflowContext);
       }
       break;
     }
@@ -213,14 +221,14 @@ export async function executeDefaultAction(task?: string): Promise<void> {
         success(`Checked out PR branch: ${prBranch}`);
       }
       selectOptions.interactiveUserInput = true;
-      selectOptions.piece = pieceId;
+      selectOptions.workflow = workflowId;
       selectOptions.interactiveMetadata = { confirmed: true, task: confirmedTask };
       selectOptions.skipTaskList = true;
       await selectAndExecuteTask(resolvedCwd, confirmedTask, selectOptions, agentOverrides);
     },
     create_issue: async ({ task: confirmedTask }) => {
       const labels = await promptLabelSelection(lang);
-      await createIssueAndSaveTask(resolvedCwd, confirmedTask, pieceId, {
+      await createIssueAndSaveTask(resolvedCwd, confirmedTask, workflowId, {
         confirmAtEndMessage: 'Add this issue to tasks?',
         labels,
       });
@@ -234,7 +242,7 @@ export async function executeDefaultAction(task?: string): Promise<void> {
           ...(prBaseBranch ? { baseBranch: prBaseBranch } : {}),
         }
         : undefined;
-      await saveTaskFromInteractive(resolvedCwd, confirmedTask, pieceId, { presetSettings });
+      await saveTaskFromInteractive(resolvedCwd, confirmedTask, workflowId, { presetSettings });
     },
     cancel: () => undefined,
   });

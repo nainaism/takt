@@ -8,35 +8,39 @@
 
 import { checkGlabCli } from './utils.js';
 import { fetchIssue, createIssue } from './issue.js';
-import { findExistingMr, commentOnMr, createMergeRequest, fetchMrReviewComments } from './pr.js';
-import type { GitProvider, CliStatus, Issue, ExistingPr, CreateIssueOptions, CreateIssueResult, CreatePrOptions, CreatePrResult, CommentResult, PrReviewData } from '../git/types.js';
+import { findExistingMr, commentOnMr, createMergeRequest, fetchMrReviewComments, mergeMr } from './pr.js';
+import type { GitProvider, CliStatus, Issue, ExistingPr, CreateIssueOptions, CreateIssueResult, CreatePrOptions, CreatePrResult, CommentResult, MergeResult, PrReviewData } from '../git/types.js';
 
 export class GitLabProvider implements GitProvider {
-  checkCliStatus(): CliStatus {
-    return checkGlabCli();
+  checkCliStatus(cwd?: string): CliStatus {
+    return checkGlabCli(cwd ?? process.cwd());
   }
 
-  fetchIssue(issueNumber: number): Issue {
-    return fetchIssue(issueNumber);
+  fetchIssue(issueNumber: number, cwd?: string): Issue {
+    return fetchIssue(issueNumber, cwd ?? process.cwd());
   }
 
-  createIssue(options: CreateIssueOptions): CreateIssueResult {
-    return createIssue(options);
+  createIssue(options: CreateIssueOptions, cwd?: string): CreateIssueResult {
+    return createIssue(options, cwd ?? process.cwd());
   }
 
-  fetchPrReviewComments(prNumber: number): PrReviewData {
-    return fetchMrReviewComments(prNumber);
+  fetchPrReviewComments(prNumber: number, cwd?: string): PrReviewData {
+    return fetchMrReviewComments(prNumber, cwd ?? process.cwd());
   }
 
-  findExistingPr(cwd: string, branch: string): ExistingPr | undefined {
-    return findExistingMr(cwd, branch);
+  findExistingPr(branch: string, cwd?: string): ExistingPr | undefined {
+    return findExistingMr(branch, cwd ?? process.cwd());
   }
 
-  createPullRequest(cwd: string, options: CreatePrOptions): CreatePrResult {
-    return createMergeRequest(cwd, options);
+  createPullRequest(options: CreatePrOptions, cwd?: string): CreatePrResult {
+    return createMergeRequest(options, cwd ?? process.cwd());
   }
 
-  commentOnPr(cwd: string, prNumber: number, body: string): CommentResult {
-    return commentOnMr(cwd, prNumber, body);
+  commentOnPr(prNumber: number, body: string, cwd?: string): CommentResult {
+    return commentOnMr(prNumber, body, cwd ?? process.cwd());
+  }
+
+  mergePr(prNumber: number, cwd?: string): MergeResult {
+    return mergeMr(prNumber, cwd ?? process.cwd());
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Project config tests.
  *
- * Tests project config loading and saving with piece_overrides,
+ * Tests project config loading and saving with workflow_overrides,
  * including empty array round-trip behavior.
  */
 
@@ -12,6 +12,14 @@ import { tmpdir, homedir } from 'node:os';
 import { loadProjectConfig, saveProjectConfig, updateProjectConfig } from '../infra/config/project/projectConfig.js';
 import { isProjectConfigEnabled } from '../infra/config/project/projectConfigGuards.js';
 import type { ProjectLocalConfig } from '../infra/config/types.js';
+import {
+  unexpectedInteractivePreviewConfigKey,
+  unexpectedInteractivePreviewEnvVar,
+  unexpectedWorkflowArpeggioConfigKey,
+  unexpectedWorkflowMcpServersConfigKey,
+  unexpectedWorkflowOverridesConfigKey,
+  unexpectedWorkflowRuntimePrepareConfigKey,
+} from '../../test/helpers/unknown-contract-test-keys.js';
 
 describe('projectConfig', () => {
   let testDir: string;
@@ -46,68 +54,70 @@ describe('projectConfig', () => {
     if (testDir) {
       rmSync(testDir, { recursive: true, force: true });
     }
+    delete process.env.TAKT_INTERACTIVE_PREVIEW_STEPS;
+    delete process.env[unexpectedInteractivePreviewEnvVar];
   });
 
-  describe('piece_overrides empty array round-trip', () => {
+  describe('workflow_overrides empty array round-trip', () => {
     it('should preserve empty quality_gates array in save/load cycle', () => {
       // Write config with empty quality_gates array
       const configPath = join(testDir, '.takt', 'config.yaml');
       const configContent = `
-piece_overrides:
+workflow_overrides:
   quality_gates: []
 `;
       writeFileSync(configPath, configContent, 'utf-8');
 
       // Load config
       const loaded = loadProjectConfig(testDir);
-      expect(loaded.pieceOverrides?.qualityGates).toEqual([]);
+      expect(loaded.workflowOverrides?.qualityGates).toEqual([]);
 
       // Save config
       saveProjectConfig(testDir, loaded);
 
       // Reload and verify empty array is preserved
       const reloaded = loadProjectConfig(testDir);
-      expect(reloaded.pieceOverrides?.qualityGates).toEqual([]);
+      expect(reloaded.workflowOverrides?.qualityGates).toEqual([]);
     });
 
-    it('should preserve empty quality_gates in movements', () => {
+    it('should preserve empty quality_gates in steps', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       const configContent = `
-piece_overrides:
-  movements:
+workflow_overrides:
+  steps:
     implement:
       quality_gates: []
 `;
       writeFileSync(configPath, configContent, 'utf-8');
 
       const loaded = loadProjectConfig(testDir);
-      expect(loaded.pieceOverrides?.movements?.implement?.qualityGates).toEqual([]);
+      expect(loaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
 
       saveProjectConfig(testDir, loaded);
 
       const reloaded = loadProjectConfig(testDir);
-      expect(reloaded.pieceOverrides?.movements?.implement?.qualityGates).toEqual([]);
+      expect(reloaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
     });
 
     it('should distinguish undefined from empty array', () => {
       // Test with undefined (not specified)
       const configPath1 = join(testDir, '.takt', 'config.yaml');
-      writeFileSync(configPath1, 'piece_overrides: {}\n', 'utf-8');
+      writeFileSync(configPath1, 'workflow_overrides: {}\n', 'utf-8');
 
       const loaded1 = loadProjectConfig(testDir);
-      expect(loaded1.pieceOverrides?.qualityGates).toBeUndefined();
+      expect(loaded1.workflowOverrides?.qualityGates).toBeUndefined();
 
       // Test with empty array (explicitly disabled)
       const configPath2 = join(testDir, '.takt', 'config.yaml');
-      writeFileSync(configPath2, 'piece_overrides:\n  quality_gates: []\n', 'utf-8');
+      writeFileSync(configPath2, 'workflow_overrides:\n  quality_gates: []\n', 'utf-8');
 
       const loaded2 = loadProjectConfig(testDir);
-      expect(loaded2.pieceOverrides?.qualityGates).toEqual([]);
+      expect(loaded2.workflowOverrides?.qualityGates).toEqual([]);
     });
 
     it('should preserve non-empty quality_gates array', () => {
       const config: ProjectLocalConfig = {
-        pieceOverrides: {
+        workflowOverrides: {
           qualityGates: ['Test 1', 'Test 2'],
         },
       };
@@ -115,13 +125,13 @@ piece_overrides:
       saveProjectConfig(testDir, config);
       const reloaded = loadProjectConfig(testDir);
 
-      expect(reloaded.pieceOverrides?.qualityGates).toEqual(['Test 1', 'Test 2']);
+      expect(reloaded.workflowOverrides?.qualityGates).toEqual(['Test 1', 'Test 2']);
     });
 
     it('should preserve personas quality_gates in save/load cycle', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       const configContent = `
-piece_overrides:
+workflow_overrides:
   personas:
     coder:
       quality_gates:
@@ -130,24 +140,24 @@ piece_overrides:
       writeFileSync(configPath, configContent, 'utf-8');
 
       const loaded = loadProjectConfig(testDir);
-      const loadedPieceOverrides = loaded.pieceOverrides as unknown as {
+      const loadedWorkflowOverrides = loaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(loadedPieceOverrides.personas?.coder?.qualityGates).toEqual(['Project persona gate']);
+      expect(loadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual(['Project persona gate']);
 
       saveProjectConfig(testDir, loaded);
 
       const reloaded = loadProjectConfig(testDir);
-      const reloadedPieceOverrides = reloaded.pieceOverrides as unknown as {
+      const reloadedWorkflowOverrides = reloaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(reloadedPieceOverrides.personas?.coder?.qualityGates).toEqual(['Project persona gate']);
+      expect(reloadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual(['Project persona gate']);
     });
 
     it('should preserve empty quality_gates array in personas', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       const configContent = `
-piece_overrides:
+workflow_overrides:
   personas:
     coder:
       quality_gates: []
@@ -155,22 +165,113 @@ piece_overrides:
       writeFileSync(configPath, configContent, 'utf-8');
 
       const loaded = loadProjectConfig(testDir);
-      const loadedPieceOverrides = loaded.pieceOverrides as unknown as {
+      const loadedWorkflowOverrides = loaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(loadedPieceOverrides.personas?.coder?.qualityGates).toEqual([]);
+      expect(loadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual([]);
 
       saveProjectConfig(testDir, loaded);
 
       const reloaded = loadProjectConfig(testDir);
-      const reloadedPieceOverrides = reloaded.pieceOverrides as unknown as {
+      const reloadedWorkflowOverrides = reloaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(reloadedPieceOverrides.personas?.coder?.qualityGates).toEqual([]);
+      expect(reloadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual([]);
+    });
+
+    it('should load workflow_overrides.steps with canonical step keys', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      const configContent = `
+workflow_overrides:
+  steps:
+    implement:
+      quality_gates: []
+`;
+      writeFileSync(configPath, configContent, 'utf-8');
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
+    });
+
+    it('should reject an unexpected override key when workflow_overrides is also present', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      const configContent = `
+workflow_overrides:
+  quality_gates:
+    - "new"
+unexpected_overrides:
+  quality_gates:
+    - "ignored"
+`;
+      writeFileSync(configPath, configContent, 'utf-8');
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/unexpected_overrides/i);
+    });
+
+    it('should reject an unexpected override key even when semantically identical to workflow_overrides', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      const configContent = `
+workflow_overrides:
+  steps:
+    implement:
+      quality_gates:
+        - "shared"
+unexpected_overrides:
+  steps:
+    implement:
+      quality_gates:
+        - "shared"
+`;
+      writeFileSync(configPath, configContent, 'utf-8');
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/unexpected_overrides/i);
+    });
+
+    it('should save workflowOverrides using workflow_overrides and steps keys', () => {
+      const config: ProjectLocalConfig = {
+        workflowOverrides: {
+          steps: {
+            implement: {
+              qualityGates: ['Project gate'],
+            },
+          },
+        },
+      };
+
+      saveProjectConfig(testDir, config);
+
+      const saved = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+      expect(saved).toContain('workflow_overrides:');
+      expect(saved).toContain('steps:');
     });
   });
 
   describe('migrated project-local fields', () => {
+    it('should fail fast when codex reasoning_effort is outside SDK enum', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      const configContent = [
+        'provider_options:',
+        '  codex:',
+        '    reasoning_effort: extreme',
+      ].join('\n');
+      writeFileSync(configPath, configContent, 'utf-8');
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/reasoning_effort/);
+    });
+
+    it('should fail fast when claude effort is outside SDK enum', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      const configContent = [
+        'provider_options:',
+        '  claude:',
+        '    effort: impossible',
+      ].join('\n');
+      writeFileSync(configPath, configContent, 'utf-8');
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/effort/);
+    });
+
     it('should load project-local fields from project config yaml', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       const configContent = [
@@ -185,7 +286,7 @@ piece_overrides:
         'minimal_output: true',
         'concurrency: 3',
         'task_poll_interval_ms: 1200',
-        'interactive_preview_movements: 2',
+        'interactive_preview_steps: 2',
       ].join('\n');
       writeFileSync(configPath, configContent, 'utf-8');
 
@@ -201,7 +302,73 @@ piece_overrides:
       expect(loaded.minimalOutput).toBe(true);
       expect(loaded.concurrency).toBe(3);
       expect(loaded.taskPollIntervalMs).toBe(1200);
-      expect(loaded.interactivePreviewMovements).toBe(2);
+      expect(loaded.interactivePreviewSteps).toBe(2);
+    });
+
+    it('should accept interactive_preview_steps in project config yaml', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        [
+          'interactive_preview_steps: 4',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.interactivePreviewSteps).toBe(4);
+    });
+
+    it('should reject unknown interactive preview key in project config yaml', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        `${unexpectedInteractivePreviewConfigKey}: 4\n`,
+        'utf-8',
+      );
+
+      expect(() => loadProjectConfig(testDir)).toThrow(
+        new RegExp(`${unexpectedInteractivePreviewConfigKey}|unrecognized`, 'i'),
+      );
+    });
+
+    it('should accept TAKT_INTERACTIVE_PREVIEW_STEPS for project config env override', () => {
+      process.env.TAKT_INTERACTIVE_PREVIEW_STEPS = '5';
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.interactivePreviewSteps).toBe(5);
+    });
+
+    it('should ignore unknown interactive preview env override for project config', () => {
+      process.env[unexpectedInteractivePreviewEnvVar] = '4';
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.interactivePreviewSteps).toBeUndefined();
+    });
+
+    it('should prefer canonical interactive preview env override over unknown env for project config', () => {
+      process.env[unexpectedInteractivePreviewEnvVar] = '4';
+      process.env.TAKT_INTERACTIVE_PREVIEW_STEPS = '5';
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.interactivePreviewSteps).toBe(5);
+    });
+
+    it('should reject unsupported workflow key in project config yaml', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        [
+          'workflow: default',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/workflow/);
     });
 
     it('should load takt_providers.assistant from project config yaml', () => {
@@ -235,7 +402,7 @@ piece_overrides:
         minimalOutput: true,
         concurrency: 4,
         taskPollIntervalMs: 1500,
-        interactivePreviewMovements: 1,
+        interactivePreviewSteps: 1,
       } as ProjectLocalConfig;
 
       saveProjectConfig(testDir, config);
@@ -250,13 +417,24 @@ piece_overrides:
       expect(raw).toContain('minimal_output: true');
       expect(raw).toContain('concurrency: 4');
       expect(raw).toContain('task_poll_interval_ms: 1500');
-      expect(raw).toContain('interactive_preview_movements: 1');
+      expect(raw).toContain('interactive_preview_steps: 1');
+    });
+
+    it('should save interactive preview count with canonical step key', () => {
+      saveProjectConfig(testDir, {
+        interactivePreviewSteps: 2,
+      } as ProjectLocalConfig);
+
+      const raw = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+
+      expect(raw).toContain('interactive_preview_steps: 2');
     });
 
     it('should save takt_providers.assistant as snake_case keys', () => {
       const config = {
         provider: 'codex',
         model: 'gpt-5.4',
+        language: 'ja',
         taktProviders: {
           assistant: { provider: 'claude', model: 'haiku' },
         },
@@ -265,6 +443,7 @@ piece_overrides:
       saveProjectConfig(testDir, config);
 
       const raw = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+      expect(raw).toContain('language: ja');
       expect(raw).toContain('takt_providers:');
       expect(raw).toContain('assistant:');
       expect(raw).toContain('provider: claude');
@@ -317,7 +496,7 @@ piece_overrides:
       expect(raw).not.toContain('minimal_output:');
       expect(raw).not.toContain('concurrency:');
       expect(raw).not.toContain('task_poll_interval_ms:');
-      expect(raw).not.toContain('interactive_preview_movements:');
+      expect(raw).not.toContain('interactive_preview_steps:');
     });
 
     it('should fail fast when project config contains global-only cli path keys', () => {
@@ -341,7 +520,6 @@ piece_overrides:
       writeFileSync(
         configPath,
         [
-          'language: ja',
           'anthropic_api_key: sk-test',
         ].join('\n'),
         'utf-8',
@@ -350,29 +528,21 @@ piece_overrides:
       expect(() => loadProjectConfig(testDir)).toThrow(/unrecognized/i);
     });
 
-    it('should disable project config when TAKT_CONFIG_DIR symlinks to the project config dir', () => {
-      const realGlobalDir = mkdtempSync(join(tmpdir(), 'takt-global-real-'));
-      const symlinkGlobalDir = join(tmpdir(), `takt-global-link-${Date.now()}`);
-      const globalConfigPath = join(realGlobalDir, 'config.yaml');
+    it('should accept project-local language override', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        [
+          'language: ja',
+          'provider: codex',
+        ].join('\n'),
+        'utf-8',
+      );
 
-      try {
-        writeFileSync(globalConfigPath, 'language: ja\n', 'utf-8');
-        rmSync(join(testDir, '.takt'), { recursive: true, force: true });
-        symlinkSync(realGlobalDir, join(testDir, '.takt'));
-        symlinkSync(realGlobalDir, symlinkGlobalDir);
-        process.env.TAKT_CONFIG_DIR = symlinkGlobalDir;
+      const loaded = loadProjectConfig(testDir);
 
-        expect(loadProjectConfig(testDir)).toEqual({});
-
-        saveProjectConfig(testDir, { provider: 'claude' });
-        expect(readFileSync(globalConfigPath, 'utf-8')).toBe('language: ja\n');
-
-        updateProjectConfig(testDir, 'provider', 'codex');
-        expect(readFileSync(globalConfigPath, 'utf-8')).toBe('language: ja\n');
-      } finally {
-        rmSync(symlinkGlobalDir, { force: true });
-        rmSync(realGlobalDir, { recursive: true, force: true });
-      }
+      expect(loaded.language).toBe('ja');
+      expect(loaded.provider).toBe('codex');
     });
   });
 
@@ -404,6 +574,20 @@ piece_overrides:
       );
 
       expect(() => loadProjectConfig(testDir)).toThrow(/Configuration error: invalid pipeline/);
+    });
+
+    it('should throw when config contains unknown top-level field that is not tracked', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        [
+          'provider: codex',
+          'unknown_top_level: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      expect(() => loadProjectConfig(testDir)).toThrow(/unrecognized/i);
     });
 
     it('should throw when pipeline value has invalid type', () => {
@@ -807,39 +991,104 @@ piece_overrides:
     });
   });
 
-  describe('piece_runtime_prepare policy round-trip', () => {
-    it('should load piece_runtime_prepare policy block', () => {
+  describe('workflow_runtime_prepare policy round-trip', () => {
+    it.each([
+      [
+        unexpectedWorkflowOverridesConfigKey,
+        [
+          `${unexpectedWorkflowOverridesConfigKey}:`,
+          '  quality_gates:',
+          '    - blocked',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowRuntimePrepareConfigKey,
+        [
+          `${unexpectedWorkflowRuntimePrepareConfigKey}:`,
+          '  custom_scripts: true',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowArpeggioConfigKey,
+        [
+          `${unexpectedWorkflowArpeggioConfigKey}:`,
+          '  custom_data_source_modules: true',
+          '  custom_merge_inline_js: false',
+          '  custom_merge_files: true',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowMcpServersConfigKey,
+        [
+          `${unexpectedWorkflowMcpServersConfigKey}:`,
+          '  stdio: true',
+          '  http: false',
+          '  sse: true',
+        ].join('\n'),
+      ],
+    ])('should reject unknown workflow-facing key %s in project config yaml', (unknownKey, content) => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(configPath, `${content}\n`, 'utf-8');
+
+      expect(() => loadProjectConfig(testDir)).toThrow(new RegExp(`${unknownKey}|unrecognized`, 'i'));
+    });
+
+    it('should load workflow_runtime_prepare policy block', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       writeFileSync(
         configPath,
-        ['piece_runtime_prepare:', '  custom_scripts: true'].join('\n'),
+        ['workflow_runtime_prepare:', '  custom_scripts: true'].join('\n'),
         'utf-8',
       );
 
       const loaded = loadProjectConfig(testDir);
 
-      expect(loaded.pieceRuntimePrepare).toEqual({ customScripts: true });
+      expect(loaded.workflowRuntimePrepare).toEqual({ customScripts: true });
     });
 
-    it('should round-trip piece_runtime_prepare policy block', () => {
+    it('should round-trip workflow_runtime_prepare policy block', () => {
       const config: ProjectLocalConfig = {
-        pieceRuntimePrepare: { customScripts: true },
+        workflowRuntimePrepare: { customScripts: true },
       };
 
       saveProjectConfig(testDir, config);
       const reloaded = loadProjectConfig(testDir);
 
-      expect(reloaded.pieceRuntimePrepare).toEqual({ customScripts: true });
+      expect(reloaded.workflowRuntimePrepare).toEqual({ customScripts: true });
+    });
+
+    it('should load workflow_runtime_prepare policy block', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        ['workflow_runtime_prepare:', '  custom_scripts: true'].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.workflowRuntimePrepare).toEqual({ customScripts: true });
+    });
+
+    it('should save workflowRuntimePrepare using workflow_runtime_prepare key', () => {
+      const config: ProjectLocalConfig = {
+        workflowRuntimePrepare: { customScripts: true },
+      };
+
+      saveProjectConfig(testDir, config);
+
+      const saved = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+      expect(saved).toContain('workflow_runtime_prepare:');
     });
   });
 
-  describe('piece_arpeggio policy round-trip', () => {
-    it('should load piece_arpeggio policy block', () => {
+  describe('workflow_arpeggio policy round-trip', () => {
+    it('should load workflow_arpeggio policy block', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       writeFileSync(
         configPath,
         [
-          'piece_arpeggio:',
+          'workflow_arpeggio:',
           '  custom_data_source_modules: true',
           '  custom_merge_inline_js: false',
           '  custom_merge_files: true',
@@ -849,16 +1098,16 @@ piece_overrides:
 
       const loaded = loadProjectConfig(testDir);
 
-      expect(loaded.pieceArpeggio).toEqual({
+      expect(loaded.workflowArpeggio).toEqual({
         customDataSourceModules: true,
         customMergeInlineJs: false,
         customMergeFiles: true,
       });
     });
 
-    it('should round-trip piece_arpeggio policy block', () => {
+    it('should round-trip workflow_arpeggio policy block', () => {
       const config: ProjectLocalConfig = {
-        pieceArpeggio: {
+        workflowArpeggio: {
           customDataSourceModules: true,
           customMergeInlineJs: true,
           customMergeFiles: false,
@@ -868,11 +1117,48 @@ piece_overrides:
       saveProjectConfig(testDir, config);
       const reloaded = loadProjectConfig(testDir);
 
-      expect(reloaded.pieceArpeggio).toEqual({
+      expect(reloaded.workflowArpeggio).toEqual({
         customDataSourceModules: true,
         customMergeInlineJs: true,
         customMergeFiles: false,
       });
+    });
+
+    it('should load workflow_arpeggio policy block', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        [
+          'workflow_arpeggio:',
+          '  custom_data_source_modules: true',
+          '  custom_merge_inline_js: false',
+          '  custom_merge_files: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.workflowArpeggio).toEqual({
+        customDataSourceModules: true,
+        customMergeInlineJs: false,
+        customMergeFiles: true,
+      });
+    });
+
+    it('should save workflowArpeggio using workflow_arpeggio key', () => {
+      const config: ProjectLocalConfig = {
+        workflowArpeggio: {
+          customDataSourceModules: true,
+          customMergeInlineJs: true,
+          customMergeFiles: false,
+        },
+      };
+
+      saveProjectConfig(testDir, config);
+
+      const saved = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+      expect(saved).toContain('workflow_arpeggio:');
     });
   });
 
@@ -902,29 +1188,53 @@ piece_overrides:
     });
   });
 
-  describe('piece_mcp_servers round-trip', () => {
-    it('should load piece_mcp_servers config block', () => {
+  describe('workflow_mcp_servers round-trip', () => {
+    it('should load workflow_mcp_servers config block', () => {
       const configPath = join(testDir, '.takt', 'config.yaml');
       writeFileSync(
         configPath,
-        ['piece_mcp_servers:', '  stdio: true', '  http: false', '  sse: true'].join('\n'),
+        ['workflow_mcp_servers:', '  stdio: true', '  http: false', '  sse: true'].join('\n'),
         'utf-8',
       );
 
       const loaded = loadProjectConfig(testDir);
 
-      expect(loaded.pieceMcpServers).toEqual({ stdio: true, http: false, sse: true });
+      expect(loaded.workflowMcpServers).toEqual({ stdio: true, http: false, sse: true });
     });
 
-    it('should round-trip piece_mcp_servers config block', () => {
+    it('should round-trip workflow_mcp_servers config block', () => {
       const config: ProjectLocalConfig = {
-        pieceMcpServers: { stdio: true, http: true, sse: false },
+        workflowMcpServers: { stdio: true, http: true, sse: false },
       };
 
       saveProjectConfig(testDir, config);
       const reloaded = loadProjectConfig(testDir);
 
-      expect(reloaded.pieceMcpServers).toEqual({ stdio: true, http: true, sse: false });
+      expect(reloaded.workflowMcpServers).toEqual({ stdio: true, http: true, sse: false });
+    });
+
+    it('should load workflow_mcp_servers config block', () => {
+      const configPath = join(testDir, '.takt', 'config.yaml');
+      writeFileSync(
+        configPath,
+        ['workflow_mcp_servers:', '  stdio: true', '  http: false', '  sse: true'].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = loadProjectConfig(testDir);
+
+      expect(loaded.workflowMcpServers).toEqual({ stdio: true, http: false, sse: true });
+    });
+
+    it('should save workflowMcpServers using workflow_mcp_servers key', () => {
+      const config: ProjectLocalConfig = {
+        workflowMcpServers: { stdio: true, http: true, sse: false },
+      };
+
+      saveProjectConfig(testDir, config);
+
+      const saved = readFileSync(join(testDir, '.takt', 'config.yaml'), 'utf-8');
+      expect(saved).toContain('workflow_mcp_servers:');
     });
   });
 

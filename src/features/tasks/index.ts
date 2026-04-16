@@ -2,16 +2,16 @@
  * Task feature exports
  */
 
-export { executePiece, type PieceExecutionResult, type PieceExecutionOptions } from './execute/pieceExecution.js';
-export { executeTask, runAllTasks, type TaskExecutionOptions } from './execute/taskExecution.js';
-export { executeAndCompleteTask } from './execute/taskExecution.js';
+export { executeWorkflow, type WorkflowExecutionResult } from './execute/workflowExecution.js';
+export { executeTask, type TaskExecutionOptions } from './execute/taskExecution.js';
+export { runAllTasks } from './execute/runAllTasks.js';
 export { resolveTaskExecution } from './execute/resolveTask.js';
 export { withPersonaSession } from './execute/session.js';
 export type { PipelineExecutionOptions } from './execute/types.js';
 export {
   selectAndExecuteTask,
   confirmAndCreateWorktree,
-  determinePiece,
+  determineWorkflow,
   type SelectAndExecuteOptions,
   type WorktreeConfirmationResult,
 } from './execute/selectAndExecute.js';

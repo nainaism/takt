@@ -37,6 +37,11 @@
 |---|------------|------------|--------------------------|---------------------|-------|----------------|
 | 1 | TEST-REOPENED-src-test-L55 | test-structure | `Previously fixed at src/test.ts:10` | `Recurred at src/test.ts:55` | Issue description | Fix approach |
 
+## Verification Evidence
+- Build: {Verified target, what was checked, and observed result; or state that it was unverified}
+- Tests: {Verified target, what was checked, and observed result; or state that it was unverified}
+- Functional check: {Verified target, what was checked, and observed result; or state that it was unverified}
+
 ## Rejection Gate
 - REJECT is valid only when at least one finding exists in `new`, `persists`, or `reopened`
 - Findings without `finding_id` are invalid

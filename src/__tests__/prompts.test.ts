@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { loadTemplate, renderTemplate, _resetCache } from '../shared/prompts/index.js';
+import { findDeprecatedTerms } from '../../test/helpers/deprecated-terminology.js';
 
 beforeEach(() => {
   _resetCache();
@@ -56,24 +57,12 @@ describe('loadTemplate', () => {
 });
 
 describe('variable substitution', () => {
-  it('replaces {{variableName}} placeholders with provided values', () => {
-    const result = loadTemplate('perform_builtin_agent_system_prompt', 'en', { agentName: 'test-agent' });
-    expect(result).toContain('You are the test-agent agent');
-    expect(result).toContain('Follow the standard test-agent piece');
-  });
-
-  it('replaces undefined variables with empty string', () => {
-    const result = loadTemplate('perform_builtin_agent_system_prompt', 'en', {});
-    expect(result).not.toContain('{{agentName}}');
-    expect(result).toContain('You are the  agent');
-  });
-
   it('replaces taskHistory variable in score_summary_system_prompt', () => {
     const result = loadTemplate('score_summary_system_prompt', 'en', {
-      pieceInfo: true,
-      pieceName: 'piece',
-      pieceDescription: 'desc',
-      movementDetails: '',
+      hasWorkflowPreview: true,
+      workflowName: 'workflow',
+      workflowDescription: 'desc',
+      stepDetails: '',
       conversation: 'Conversation: User: test',
       taskHistory: '## Task execution history\n- Worktree ID: wt-1',
     });
@@ -90,14 +79,14 @@ describe('variable substitution', () => {
     expect(result).toContain('| 1 | Success |');
   });
 
-  it('interactive prompt does not contain piece info', () => {
+  it('interactive prompt does not contain workflow info', () => {
     const result = loadTemplate('score_interactive_system_prompt', 'en', {
-      pieceInfo: true,
-      pieceName: 'my-piece',
-      pieceDescription: 'Test description',
+      hasWorkflowPreview: true,
+      workflowName: 'my-workflow',
+      workflowDescription: 'Test description',
     });
-    // ピース情報はインタラクティブプロンプトには含まれない（要約プロンプトにのみ含まれる）
-    expect(result).not.toContain('"my-piece"');
+    // ワークフロー情報はインタラクティブプロンプトには含まれない（要約プロンプトにのみ含まれる）
+    expect(result).not.toContain('"my-workflow"');
     expect(result).not.toContain('Test description');
   });
 });
@@ -158,7 +147,6 @@ describe('template file existence', () => {
     'perform_phase2_message',
     'perform_phase3_message',
     'perform_agent_system_prompt',
-    'perform_builtin_agent_system_prompt',
     'perform_judge_message',
   ];
 
@@ -211,20 +199,89 @@ describe('template content integrity', () => {
     expect(ja).toContain('厳守事項');
   });
 
+  it('score prompts use workflow/step terminology in both languages', () => {
+    const interactiveEn = loadTemplate('score_interactive_system_prompt', 'en');
+    expect(interactiveEn).toContain('workflow execution');
+    expect(interactiveEn).toContain('## Workflow Structure');
+    expect(interactiveEn).toContain('**Workflow:** {{runWorkflow}}');
+    expect(interactiveEn).toContain('### Step Logs');
+    expect(findDeprecatedTerms(interactiveEn)).toEqual([]);
+
+    const interactiveJa = loadTemplate('score_interactive_system_prompt', 'ja');
+    expect(interactiveJa).toContain('ワークフロー実行用の指示書');
+    expect(interactiveJa).toContain('## ワークフロー構成');
+    expect(interactiveJa).toContain('**ワークフロー:** {{runWorkflow}}');
+    expect(interactiveJa).toContain('### ステップログ');
+    expect(findDeprecatedTerms(interactiveJa)).toEqual([]);
+
+    const policyEn = loadTemplate('score_interactive_policy', 'en');
+    expect(policyEn).toContain('instructions for the workflow');
+    expect(policyEn).toContain('workflow agents');
+    expect(findDeprecatedTerms(policyEn)).toEqual([]);
+
+    const policyJa = loadTemplate('score_interactive_policy', 'ja');
+    expect(policyJa).toContain('ワークフローへの指示書作成');
+    expect(policyJa).toContain('ワークフローのエージェント');
+    expect(findDeprecatedTerms(policyJa)).toEqual([]);
+
+    const retryEn = loadTemplate('score_retry_system_prompt', 'en');
+    expect(retryEn).toContain('Workflow Execution');
+    expect(retryEn).toContain('**Failed step:** {{failedStep}}');
+    expect(retryEn).toContain('### Step Logs');
+    expect(findDeprecatedTerms(retryEn)).toEqual([]);
+
+    const retryJa = loadTemplate('score_retry_system_prompt', 'ja');
+    expect(retryJa).toContain('ワークフロー実行');
+    expect(retryJa).toContain('**失敗ステップ:** {{failedStep}}');
+    expect(retryJa).toContain('### ステップログ');
+    expect(findDeprecatedTerms(retryJa)).toEqual([]);
+
+    const instructEn = loadTemplate('score_instruct_system_prompt', 'en');
+    expect(instructEn).toContain('Workflow Execution');
+    expect(instructEn).toContain('**Workflow:** {{runWorkflow}}');
+    expect(findDeprecatedTerms(instructEn)).toEqual([]);
+
+    const instructJa = loadTemplate('score_instruct_system_prompt', 'ja');
+    expect(instructJa).toContain('ワークフロー実行');
+    expect(instructJa).toContain('**ワークフロー:** {{runWorkflow}}');
+    expect(findDeprecatedTerms(instructJa)).toEqual([]);
+
+    const summaryEn = loadTemplate('score_summary_system_prompt', 'en');
+    expect(summaryEn).toContain('passed to a workflow');
+    expect(summaryEn).toContain('Workflow description: {{workflowDescription}}');
+    expect(findDeprecatedTerms(summaryEn)).toEqual([]);
+
+    const summaryJa = loadTemplate('score_summary_system_prompt', 'ja');
+    expect(summaryJa).toContain('ワークフロー実行用の具体的なタスク指示書');
+    expect(summaryJa).toContain('ワークフローの内容: {{workflowDescription}}');
+    expect(findDeprecatedTerms(summaryJa)).toEqual([]);
+  });
+
   it('score_slug_system_prompt contains format specification', () => {
     const result = loadTemplate('score_slug_system_prompt', 'en');
     expect(result).toContain('verb-noun');
     expect(result).toContain('max 30 chars');
   });
 
-  it('perform_builtin_agent_system_prompt contains {{agentName}} placeholder', () => {
-    const result = loadTemplate('perform_builtin_agent_system_prompt', 'en');
-    expect(result).toContain('{{agentName}}');
-  });
-
   it('perform_agent_system_prompt contains {{agentDefinition}} placeholder', () => {
     const result = loadTemplate('perform_agent_system_prompt', 'en');
     expect(result).toContain('{{agentDefinition}}');
+  });
+
+  it('perform_agent_system_prompt uses workflow/step terminology in both languages', () => {
+    const en = loadTemplate('perform_agent_system_prompt', 'en');
+    expect(en).toContain('**Workflow**: A processing flow combining multiple steps');
+    expect(en).toContain('- Workflow: {{workflowName}}');
+    expect(en).toContain('- Current Step: {{currentStep}}');
+    expect(en).toContain('preceding and following steps');
+    expect(findDeprecatedTerms(en)).toEqual([]);
+
+    const ja = loadTemplate('perform_agent_system_prompt', 'ja');
+    expect(ja).toContain('**ワークフロー**: 複数のステップを組み合わせた処理フロー');
+    expect(ja).toContain('- ワークフロー: {{workflowName}}');
+    expect(ja).toContain('- 現在のステップ: {{currentStep}}');
+    expect(ja).toContain('前後のステップとの連携');
+    expect(findDeprecatedTerms(ja)).toEqual([]);
   });
 
   it('perform_judge_message contains {{agentOutput}} and {{conditionList}} placeholders', () => {
@@ -239,24 +296,57 @@ describe('template content integrity', () => {
     expect(en).toContain('## Execution Rules');
     expect(en).toContain('Do NOT run git commit');
     expect(en).toContain('Do NOT use `cd`');
-    expect(en).toContain('## Piece Context');
+    expect(en).toContain('## Workflow Context');
+    expect(findDeprecatedTerms(en)).toEqual([]);
     expect(en).toContain('## Instructions');
   });
 
-  it('perform_phase1_message contains piece context variables', () => {
+  it('perform_phase1_message uses workflow/step terminology in both languages', () => {
+    const en = loadTemplate('perform_phase1_message', 'en');
+    expect(en).toContain('after workflow completion');
+    expect(en).toContain('- Workflow: {{workflowName}}');
+    expect(en).toContain('- Step Iteration: {{stepIteration}}');
+    expect(en).toContain('- Step: {{stepName}}');
+    expect(en).toContain('Before completing this step');
+    expect(findDeprecatedTerms(en)).toEqual([]);
+
+    const ja = loadTemplate('perform_phase1_message', 'ja');
+    expect(ja).toContain('ワークフロー完了後');
+    expect(ja).toContain('- ワークフロー: {{workflowName}}');
+    expect(ja).toContain('- Step Iteration: {{stepIteration}}');
+    expect(ja).toContain('- Step: {{stepName}}');
+    expect(ja).toContain('このステップを完了する前に');
+    expect(findDeprecatedTerms(ja)).toEqual([]);
+  });
+
+  it('perform_phase1_message contains workflow context variables', () => {
     const en = loadTemplate('perform_phase1_message', 'en');
     expect(en).toContain('{{iteration}}');
-    expect(en).toContain('{{movement}}');
+    expect(en).toContain('{{stepName}}');
     expect(en).toContain('{{workingDirectory}}');
   });
 
   it('perform_phase2_message contains report-specific rules', () => {
     const en = loadTemplate('perform_phase2_message', 'en');
+    expect(en).toContain('after workflow completion');
     expect(en).toContain('Do NOT modify project source files');
+    expect(en).toContain('## Workflow Context');
+    expect(findDeprecatedTerms(en)).toEqual([]);
     expect(en).toContain('## Instructions');
 
     const ja = loadTemplate('perform_phase2_message', 'ja');
+    expect(ja).toContain('ワークフロー完了後');
     expect(ja).toContain('プロジェクトのソースファイルを変更しないでください');
+    expect(ja).toContain('## Workflow Context');
+    expect(findDeprecatedTerms(ja)).toEqual([]);
+  });
+
+  it('perform_phase2_message does not reintroduce workflow terminology regressions', () => {
+    const en = loadTemplate('perform_phase2_message', 'en');
+    expect(findDeprecatedTerms(en)).toEqual([]);
+
+    const ja = loadTemplate('perform_phase2_message', 'ja');
+    expect(findDeprecatedTerms(ja)).toEqual([]);
   });
 
   it('perform_phase3_message contains criteria and output variables', () => {

@@ -6,10 +6,18 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockAutoCommitAndPush, mockPushHeadToOriginBranch, mockFindExistingPr, mockCommentOnPr, mockCreatePullRequest, mockBuildPrBody, mockCreatePullRequestSafely } =
+const {
+  mockAutoCommitAndPush,
+  mockPushBranch,
+  mockFindExistingPr,
+  mockCommentOnPr,
+  mockCreatePullRequest,
+  mockBuildPrBody,
+  mockCreatePullRequestSafely,
+} =
   vi.hoisted(() => ({
     mockAutoCommitAndPush: vi.fn(),
-    mockPushHeadToOriginBranch: vi.fn(),
+    mockPushBranch: vi.fn(),
     mockFindExistingPr: vi.fn(),
     mockCommentOnPr: vi.fn(),
     mockCreatePullRequest: vi.fn(),
@@ -21,10 +29,13 @@ vi.mock('../infra/task/index.js', () => ({
   autoCommitAndPush: (...args: unknown[]) => mockAutoCommitAndPush(...args),
 }));
 
-vi.mock('../infra/task/git.js', () => ({
-  pushHeadToOriginBranch: (...args: unknown[]) => mockPushHeadToOriginBranch(...args),
-}));
-
+vi.mock('../infra/task/git.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../infra/task/git.js')>();
+  return {
+    ...actual,
+    pushBranch: (...args: unknown[]) => mockPushBranch(...args),
+  };
+});
 vi.mock('../infra/git/index.js', () => ({
   getGitProvider: () => ({
     findExistingPr: (...args: unknown[]) => mockFindExistingPr(...args),
@@ -50,7 +61,13 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
   }),
 }));
 
-import { postExecutionFlow } from '../features/tasks/execute/postExecution.js';
+import {
+  postExecutionFlow,
+  type PostExecutionOptions,
+} from '../features/tasks/execute/postExecution.js';
+
+const MOCK_NFF_DIAGNOSTIC_TAIL =
+  'Push rejected (non-fast-forward): remote is ahead; resync or recreate worktree; stale local branch may apply.';
 
 const baseOptions = {
   execCwd: '/clone',
@@ -60,19 +77,19 @@ const baseOptions = {
   baseBranch: 'main',
   shouldCreatePr: true,
   draftPr: false,
-  pieceIdentifier: 'default',
+  workflowIdentifier: 'default',
 };
 
 describe('postExecutionFlow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: 'abc123' });
-    mockPushHeadToOriginBranch.mockReturnValue(undefined);
+    mockPushBranch.mockReturnValue(undefined);
     mockCommentOnPr.mockReturnValue({ success: true });
     mockCreatePullRequest.mockReturnValue({ success: true, url: 'https://github.com/org/repo/pull/1' });
-    mockCreatePullRequestSafely.mockImplementation((provider, cwd, options) => {
+    mockCreatePullRequestSafely.mockImplementation((provider, options, cwd) => {
       try {
-        return provider.createPullRequest(cwd, options);
+        return provider.createPullRequest(options, cwd);
       } catch (error) {
         return {
           success: false,
@@ -89,6 +106,18 @@ describe('postExecutionFlow', () => {
 
     expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
     expect(mockCommentOnPr).not.toHaveBeenCalled();
+    expect(mockBuildPrBody).toHaveBeenCalledWith(undefined, 'Workflow `default` completed successfully.');
+  });
+
+  it('autoCommitAndPush に branch パラメータが渡される', async () => {
+    mockFindExistingPr.mockReturnValue(undefined);
+    await postExecutionFlow(baseOptions);
+    expect(mockAutoCommitAndPush).toHaveBeenCalledWith(
+      '/clone',
+      'Fix the bug',
+      '/project',
+      'task/fix-the-bug',
+    );
   });
 
   it('既存PRがある場合は commentOnPr を呼び createPullRequest は呼ばない', async () => {
@@ -96,7 +125,7 @@ describe('postExecutionFlow', () => {
 
     await postExecutionFlow(baseOptions);
 
-    expect(mockCommentOnPr).toHaveBeenCalledWith('/project', 42, 'pr-body');
+    expect(mockCommentOnPr).toHaveBeenCalledWith(42, 'pr-body', '/project');
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
   });
 
@@ -130,8 +159,8 @@ describe('postExecutionFlow', () => {
     await postExecutionFlow({ ...baseOptions, draftPr: true });
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ draft: true }),
+      '/project',
     );
   });
 
@@ -141,8 +170,8 @@ describe('postExecutionFlow', () => {
     await postExecutionFlow({ ...baseOptions, draftPr: false });
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ draft: false }),
+      '/project',
     );
   });
 
@@ -153,50 +182,48 @@ describe('postExecutionFlow', () => {
     const result = await postExecutionFlow(baseOptions);
 
     expect(result.prFailed).toBe(true);
-    expect(result.prError).toBe('Failed to create pull request.');
+    expect(result.prError).toBe('Failed to create pull request. Base ref must be a branch');
     expect(result.prUrl).toBeUndefined();
   });
 
-  it('ローカルpush失敗後も commitHash があれば PR 作成失敗を prFailed として返す', async () => {
-    // Given: autoCommit keeps the commitHash even though its local push already failed.
+  it('ローカルpush失敗後も commitHash があれば（localPushFailed なし）PR 作成失敗を prFailed として返す', async () => {
+    // relay push 済みのケースでは、PR 作成まで継続して失敗理由を返す。
     mockAutoCommitAndPush.mockReturnValue({
       success: true,
       commitHash: 'abc123',
-      message: 'Committed locally; local push failed',
+      message: 'Committed locally; relay push succeeded',
     });
     mockFindExistingPr.mockReturnValue(undefined);
     mockCreatePullRequest.mockReturnValue({ success: false, error: 'Base ref must be a branch' });
 
-    // When: post-execution continues with origin push and PR creation.
     const result = await postExecutionFlow(baseOptions);
-
-    // Then: the workflow should continue into the existing pr_failed path.
-    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({
         branch: 'task/fix-the-bug',
         base: 'main',
         draft: false,
         title: 'Fix the bug',
       }),
+      '/project',
     );
     expect(result.prFailed).toBe(true);
-    expect(result.prError).toBe('Failed to create pull request.');
+    expect(result.prError).toBe('Failed to create pull request. Base ref must be a branch');
   });
 
-  it('origin への push 失敗時は PR 処理へ進まず prFailed: true を返す', async () => {
-    mockPushHeadToOriginBranch.mockImplementation(() => {
-      throw new Error('fatal: could not read Password for https://example.com/repo.git');
+  it('relay push 失敗時（localPushFailed: true）は shouldCreatePr に関わらず taskFailed: true を返す', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      localPushFailed: true,
+      message: 'Committed: abc123 - takt: Fix the bug',
     });
 
     const result = await postExecutionFlow(baseOptions);
-
-    expect(mockPushHeadToOriginBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
-    expect(result.prFailed).toBe(true);
-    expect(result.prError).toBe('Failed to push branch to origin.');
+    expect(result.taskFailed).toBe(true);
+    expect(result.taskError).toBe('Push to main repo failed after commit creation.');
+    expect(result.prFailed).toBeUndefined();
   });
 
   it('auto-commit 失敗時は通常失敗を返し、PR 処理へ進まない', async () => {
@@ -207,7 +234,6 @@ describe('postExecutionFlow', () => {
 
     const result = await postExecutionFlow(baseOptions);
 
-    expect(mockPushHeadToOriginBranch).not.toHaveBeenCalled();
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
     expect(result.prFailed).toBeUndefined();
@@ -224,7 +250,6 @@ describe('postExecutionFlow', () => {
 
     const result = await postExecutionFlow({ ...baseOptions, shouldCreatePr: false });
 
-    expect(mockPushHeadToOriginBranch).not.toHaveBeenCalled();
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
     expect(result.prFailed).toBeUndefined();
@@ -243,11 +268,185 @@ describe('postExecutionFlow', () => {
 
     const result = await postExecutionFlow({ ...baseOptions, shouldCreatePr: false });
 
-    expect(mockPushHeadToOriginBranch).not.toHaveBeenCalled();
     expect(mockFindExistingPr).not.toHaveBeenCalled();
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
     expect(result.prFailed).toBeUndefined();
     expect(result.prError).toBeUndefined();
+    expect(result.taskFailed).toBe(true);
+    expect(result.taskError).toBe('Push to main repo failed after commit creation.');
+  });
+
+  it('auto_pr かつ shouldPublishBranchToOrigin では root branch を origin へ push して PR 作成へ進む', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+    mockFindExistingPr.mockReturnValue(undefined);
+
+    const result = await postExecutionFlow({
+      ...baseOptions,
+      shouldPublishBranchToOrigin: true,
+    });
+
+    expect(mockPushBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
+    expect(mockCreatePullRequest).toHaveBeenCalled();
+    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1');
+    expect(result.prFailed).toBeUndefined();
+  });
+
+  it('shouldPublishBranchToOrigin が true のとき root branch を origin へ push して完了できる', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+
+    const options: PostExecutionOptions = {
+      ...baseOptions,
+      shouldCreatePr: false,
+      shouldPublishBranchToOrigin: true,
+    };
+
+    const result = await postExecutionFlow(options);
+
+    expect(mockPushBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
+    expect(mockFindExistingPr).not.toHaveBeenCalled();
+    expect(mockCreatePullRequest).not.toHaveBeenCalled();
+    expect(result.taskFailed).toBeUndefined();
+    expect(result.taskError).toBeUndefined();
+    expect(result.prFailed).toBeUndefined();
+  });
+
+  it('shouldPublishBranchToOrigin が true でローカル push 成功時も root branch を origin へ push する', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+
+    const options: PostExecutionOptions = {
+      ...baseOptions,
+      shouldCreatePr: false,
+      shouldPublishBranchToOrigin: true,
+    };
+
+    const result = await postExecutionFlow(options);
+
+    expect(mockPushBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
+    expect(result.taskFailed).toBeUndefined();
+    expect(result.prFailed).toBeUndefined();
+  });
+
+  it('shouldPublishBranchToOrigin が true でコミットがない場合は origin push もしない', async () => {
+    mockAutoCommitAndPush.mockReturnValue({ success: true, commitHash: undefined });
+
+    const options: PostExecutionOptions = {
+      ...baseOptions,
+      shouldCreatePr: false,
+      shouldPublishBranchToOrigin: true,
+    };
+
+    await postExecutionFlow(options);
+
+    expect(mockPushBranch).not.toHaveBeenCalled();
+  });
+
+  it('shouldPublishBranchToOrigin が true のとき origin push が失敗したら prFailed で prError に伝播する', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+    mockPushBranch.mockImplementation(() => {
+      throw new Error('! [rejected] task/fix-the-bug -> task/fix-the-bug (non-fast-forward)');
+    });
+
+    const options: PostExecutionOptions = {
+      ...baseOptions,
+      shouldCreatePr: false,
+      shouldPublishBranchToOrigin: true,
+    };
+
+    const result = await postExecutionFlow(options);
+
+    expect(mockPushBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
+    expect(result.prFailed).toBe(true);
+    expect(result.prError).toContain('Failed to push branch to origin.');
+    expect(result.prError).toContain('non-fast-forward');
+    expect(result.prError).not.toContain('stale local branch');
+    expect(result.taskFailed).toBeUndefined();
+  });
+
+  it('shouldCreatePr が true かつ shouldPublishBranchToOrigin で origin push が失敗したら prFailed を返す', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+    mockPushBranch.mockImplementation(() => {
+      throw new Error('! [rejected] task/fix-the-bug -> task/fix-the-bug (non-fast-forward)');
+    });
+
+    const result = await postExecutionFlow({
+      ...baseOptions,
+      shouldCreatePr: true,
+      shouldPublishBranchToOrigin: true,
+    });
+
+    expect(mockPushBranch).toHaveBeenCalledWith('/project', 'task/fix-the-bug');
+    expect(mockFindExistingPr).not.toHaveBeenCalled();
+    expect(mockCreatePullRequest).not.toHaveBeenCalled();
+    expect(result.prFailed).toBe(true);
+    expect(result.prError).toContain('Failed to push branch to origin.');
+    expect(result.prError).toContain('non-fast-forward');
+    expect(result.prError).not.toContain('stale local branch');
+    expect(result.taskFailed).toBeUndefined();
+  });
+
+  it('root からの origin push が git 整形済み non-fast-forward エラーのとき prError に診断ヒントまで伝播する', async () => {
+    const stderr =
+      '! [rejected] task/fix-the-bug -> task/fix-the-bug (non-fast-forward)\n' +
+      'hint: Updates were rejected because the tip of your current branch is behind its remote counterpart.\n';
+    const base = 'Command failed: git push origin HEAD:refs/heads/task/fix-the-bug';
+    const formatted = `${base}\n${stderr.trim()}\n${MOCK_NFF_DIAGNOSTIC_TAIL}`;
+
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+    mockPushBranch.mockImplementation(() => {
+      throw new Error(formatted);
+    });
+
+    const result = await postExecutionFlow({
+      ...baseOptions,
+      shouldCreatePr: true,
+      shouldPublishBranchToOrigin: true,
+    });
+
+    expect(result.prFailed).toBe(true);
+    expect(result.prError).toContain('Failed to push branch to origin.');
+    expect(result.prError).toMatch(/non-fast-forward/i);
+    expect(result.prError).toContain('stale local branch');
+  });
+
+  it('shouldPublishBranchToOrigin が true でもローカル push 失敗時は origin push に進まず taskFailed を返す', async () => {
+    mockAutoCommitAndPush.mockReturnValue({
+      success: true,
+      commitHash: 'abc123',
+      localPushFailed: true,
+      message: 'Committed: abc123 - takt: Fix the bug',
+    });
+
+    const result = await postExecutionFlow({
+      ...baseOptions,
+      shouldCreatePr: false,
+      shouldPublishBranchToOrigin: true,
+    });
+
+    expect(mockPushBranch).not.toHaveBeenCalled();
     expect(result.taskFailed).toBe(true);
     expect(result.taskError).toBe('Push to main repo failed after commit creation.');
   });
@@ -261,7 +460,7 @@ describe('postExecutionFlow', () => {
     const result = await postExecutionFlow(baseOptions);
 
     expect(result.prFailed).toBe(true);
-    expect(result.prError).toBe('Failed to create pull request.');
+    expect(result.prError).toBe('Failed to create pull request. --repo is not supported with GitLab provider. Use cwd context instead.');
     expect(result.prUrl).toBeUndefined();
   });
 
@@ -309,8 +508,8 @@ describe('postExecutionFlow', () => {
     });
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ title: '[#123] Fix the bug' }),
+      '/project',
     );
   });
 
@@ -323,8 +522,8 @@ describe('postExecutionFlow', () => {
     });
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ title: 'Fix the bug' }),
+      '/project',
     );
   });
 
@@ -334,8 +533,8 @@ describe('postExecutionFlow', () => {
     await postExecutionFlow(baseOptions);
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ title: 'Fix the bug' }),
+      '/project',
     );
   });
 
@@ -351,8 +550,8 @@ describe('postExecutionFlow', () => {
     });
 
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/project',
       expect.objectContaining({ title: expectedTitle }),
+      '/project',
     );
   });
 });

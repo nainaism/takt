@@ -8,14 +8,37 @@ describe('E2E: Help command (takt --help)', () => {
   let isolatedEnv: IsolatedEnv;
   let repo: LocalRepo;
 
+  const cleanupResources = (): void => {
+    const errors: unknown[] = [];
+
+    try {
+      repo.cleanup();
+    } catch (error) {
+      errors.push(error);
+    }
+
+    try {
+      isolatedEnv.cleanup();
+    } catch (error) {
+      errors.push(error);
+    }
+
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'Failed to clean up E2E help test resources');
+    }
+  };
+
   beforeEach(() => {
     isolatedEnv = createIsolatedEnv();
     repo = createLocalRepo();
   });
 
   afterEach(() => {
-    try { repo.cleanup(); } catch { /* best-effort */ }
-    try { isolatedEnv.cleanup(); } catch { /* best-effort */ }
+    cleanupResources();
   });
 
   it('should display subcommand list with --help', () => {
@@ -52,7 +75,29 @@ describe('E2E: Help command (takt --help)', () => {
     expect(output).toMatch(/run|task|pending/);
   });
 
-  it('should show prompt argument help without current-piece wording', () => {
+  it('should display --ignore-exceed in takt run --help', () => {
+    const result = runTakt({
+      args: ['run', '--help'],
+      cwd: repo.path,
+      env: isolatedEnv.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('--ignore-exceed');
+  });
+
+  it('should not display --ignore-exceed in takt watch --help', () => {
+    const result = runTakt({
+      args: ['watch', '--help'],
+      cwd: repo.path,
+      env: isolatedEnv.env,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain('--ignore-exceed');
+  });
+
+  it('should show prompt argument help without current-workflow wording', () => {
     // Given: a local repo with isolated env
 
     // When: running takt prompt --help
@@ -62,7 +107,7 @@ describe('E2E: Help command (takt --help)', () => {
       env: isolatedEnv.env,
     });
 
-    // Then: prompt help uses explicit default piece wording
+    // Then: prompt help uses explicit default workflow wording
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toMatch(/defaults to ["']default["']/i);
     expect(result.stdout).not.toMatch(/defaults to current/i);

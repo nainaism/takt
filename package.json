@@ -1,7 +1,7 @@
 {
   "name": "takt",
-  "version": "0.32.2",
-  "description": "TAKT: TAKT Agent Koordination Topology - AI Agent Piece Orchestration",
+  "version": "0.36.0",
+  "description": "TAKT: TAKT Agent Koordination Topology - AI Agent Workflow Orchestration",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -17,8 +17,9 @@
     "test:e2e": "tmp=\"$(mktemp -t takt-e2e.XXXXXX)\"; npm run test:e2e:mock >\"$tmp\" 2>&1; code=$?; cat \"$tmp\"; if grep -q \"error connecting to api.github.com\" \"$tmp\"; then echo \"[takt] GitHub connectivity error detected in E2E output\"; code=1; fi; rm -f \"$tmp\"; if [ \"$code\" -eq 0 ]; then msg='test:e2e passed'; else msg=\"test:e2e failed (exit=$code)\"; fi; if command -v osascript >/dev/null 2>&1; then osascript -e \"display notification \\\"$msg\\\" with title \\\"takt\\\" subtitle \\\"E2E\\\"\" >/dev/null 2>&1 || true; fi; echo \"[takt] $msg\"; exit $code",
     "test:e2e:mock": "TAKT_E2E_PROVIDER=mock vitest run --config vitest.config.e2e.mock.ts --outputFile.json=e2e/results/mock.json",
     "test:e2e:all": "npm run test:e2e:mock && npm run test:e2e:provider",
-    "test:e2e:provider": "npm run test:e2e:provider:claude && npm run test:e2e:provider:codex && npm run test:e2e:provider:opencode",
+    "test:e2e:provider": "npm run test:e2e:provider:claude && npm run test:e2e:provider:claude-sdk && npm run test:e2e:provider:codex && npm run test:e2e:provider:opencode",
     "test:e2e:provider:claude": "TAKT_E2E_PROVIDER=claude vitest run --config vitest.config.e2e.provider.ts --outputFile.json=e2e/results/claude.json",
+    "test:e2e:provider:claude-sdk": "TAKT_E2E_PROVIDER=claude-sdk vitest run --config vitest.config.e2e.provider.ts --outputFile.json=e2e/results/claude-sdk.json",
     "test:e2e:provider:codex": "TAKT_E2E_PROVIDER=codex vitest run --config vitest.config.e2e.provider.ts --outputFile.json=e2e/results/codex.json",
     "test:e2e:provider:opencode": "TAKT_E2E_PROVIDER=opencode TAKT_E2E_MODEL=${TAKT_E2E_MODEL:-opencode/big-pickle} vitest run --config vitest.config.e2e.provider.ts --outputFile.json=e2e/results/opencode.json",
     "test:e2e:provider:cursor": "TAKT_AUTO_PR=false TAKT_E2E_PROVIDER=cursor vitest run --config vitest.config.e2e.cursor.ts --outputFile.json=e2e/results/cursor.json",
@@ -37,7 +38,7 @@
     "ai",
     "agent",
     "orchestration",
-    "piece",
+    "workflow",
     "automation",
     "llm",
     "anthropic"
@@ -65,12 +66,14 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@openai/codex-sdk": "^0.114.0",
     "@opencode-ai/sdk": ">=1.2.10 <1.3.0",
+    "ajv": "^6.12.6",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "faceted-prompting": "^0.1.0",
+    "traced-config": "^0.3.0",
     "update-notifier": "^7.3.1",
     "wanakana": "^5.3.1",
-    "yaml": "^2.4.5",
+    "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -1,13 +1,15 @@
 /**
- * Tests for piece transitions module (movement-based)
+ * Tests for workflow transitions module (step-based)
  */
 
 import { describe, it, expect } from 'vitest';
-import { determineNextMovementByRules } from '../core/piece/index.js';
-import { extractBlockedPrompt } from '../core/piece/engine/transitions.js';
-import type { PieceMovement } from '../core/models/index.js';
+import { determineRuleTransition, extractBlockedPrompt } from '../core/workflow/engine/transitions.js';
+import { determineNextStepByRules } from '../core/workflow/index.js';
+import type { WorkflowStep } from '../core/models/index.js';
 
-function createMovementWithRules(rules: { condition: string; next: string }[]): PieceMovement {
+function createStepWithRules(
+  rules: Array<{ condition: string; next?: string; returnValue?: string; requiresUserInput?: boolean }>,
+): WorkflowStep {
   return {
     name: 'test-step',
     persona: 'test-agent',
@@ -16,34 +18,36 @@ function createMovementWithRules(rules: { condition: string; next: string }[]): 
     passPreviousResponse: false,
     rules: rules.map((r) => ({
       condition: r.condition,
-      next: r.next,
+      ...(r.next !== undefined ? { next: r.next } : {}),
+      ...(r.returnValue !== undefined ? { returnValue: r.returnValue } : {}),
+      ...(r.requiresUserInput === true ? { requiresUserInput: true } : {}),
     })),
   };
 }
 
-describe('determineNextMovementByRules', () => {
-  it('should return next movement for valid rule index', () => {
-    const step = createMovementWithRules([
+describe('determineNextStepByRules', () => {
+  it('should return next step for a valid rule index', () => {
+    const step = createStepWithRules([
       { condition: 'Clear', next: 'implement' },
       { condition: 'Blocked', next: 'ABORT' },
     ]);
 
-    expect(determineNextMovementByRules(step, 0)).toBe('implement');
-    expect(determineNextMovementByRules(step, 1)).toBe('ABORT');
+    expect(determineNextStepByRules(step, 0)).toBe('implement');
+    expect(determineNextStepByRules(step, 1)).toBe('ABORT');
   });
 
   it('should return null for out-of-bounds index', () => {
-    const step = createMovementWithRules([
+    const step = createStepWithRules([
       { condition: 'Clear', next: 'implement' },
     ]);
 
-    expect(determineNextMovementByRules(step, 1)).toBeNull();
-    expect(determineNextMovementByRules(step, -1)).toBeNull();
-    expect(determineNextMovementByRules(step, 100)).toBeNull();
+    expect(determineNextStepByRules(step, 1)).toBeNull();
+    expect(determineNextStepByRules(step, -1)).toBeNull();
+    expect(determineNextStepByRules(step, 100)).toBeNull();
   });
 
-  it('should return null when movement has no rules', () => {
-    const step: PieceMovement = {
+  it('should return null when step has no rules', () => {
+    const step: WorkflowStep = {
       name: 'test-step',
       persona: 'test-agent',
       personaDisplayName: 'Test Agent',
@@ -51,20 +55,20 @@ describe('determineNextMovementByRules', () => {
       passPreviousResponse: false,
     };
 
-    expect(determineNextMovementByRules(step, 0)).toBeNull();
+    expect(determineNextStepByRules(step, 0)).toBeNull();
   });
 
-  it('should handle COMPLETE as next movement', () => {
-    const step = createMovementWithRules([
+  it('should handle COMPLETE as the next step', () => {
+    const step = createStepWithRules([
       { condition: 'All passed', next: 'COMPLETE' },
     ]);
 
-    expect(determineNextMovementByRules(step, 0)).toBe('COMPLETE');
+    expect(determineNextStepByRules(step, 0)).toBe('COMPLETE');
   });
 
   it('should return null when rule exists but next is undefined', () => {
-    // Parallel sub-movement rules may omit `next` (optional field)
-    const step: PieceMovement = {
+    // Parallel sub-step rules may omit `next` (optional field)
+    const step: WorkflowStep = {
       name: 'sub-step',
       persona: 'test-agent',
       personaDisplayName: 'Test Agent',
@@ -76,8 +80,33 @@ describe('determineNextMovementByRules', () => {
       ],
     };
 
-    expect(determineNextMovementByRules(step, 0)).toBeNull();
-    expect(determineNextMovementByRules(step, 1)).toBeNull();
+    expect(determineNextStepByRules(step, 0)).toBeNull();
+    expect(determineNextStepByRules(step, 1)).toBeNull();
+  });
+
+  it('should return logical result for return rules', () => {
+    const step: WorkflowStep = {
+      name: 'return-step',
+      persona: 'test-agent',
+      personaDisplayName: 'Test Agent',
+      instruction: '{task}',
+      passPreviousResponse: false,
+      rules: [
+        { condition: 'retry', returnValue: 'retry_plan' },
+      ],
+    };
+
+    expect(determineRuleTransition(step, 0)).toEqual({ returnValue: 'retry_plan' });
+    expect(determineNextStepByRules(step, 0)).toBeNull();
+  });
+
+  it('should include user input requirement in resolved transition', () => {
+    const step = createStepWithRules([
+      { condition: 'ask_user', requiresUserInput: true },
+    ]);
+
+    expect(determineRuleTransition(step, 0)).toEqual({ requiresUserInput: true });
+    expect(determineNextStepByRules(step, 0)).toBeNull();
   });
 });
 

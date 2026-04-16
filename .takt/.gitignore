@@ -8,15 +8,16 @@
 !config.yaml
 
 # Facets and pieces (version-controlled)
-!pieces/
-!pieces/**
-!personas/
-!personas/**
-!policies/
-!policies/**
-!knowledge/
-!knowledge/**
-!instructions/
-!instructions/**
-!output-contracts/
-!output-contracts/**
+!workflows/
+!workflows/**
+!facets/
+!facets/personas/
+!facets/personas/**
+!facets/policies/
+!facets/policies/**
+!facets/knowledge/
+!facets/knowledge/**
+!facets/instructions/
+!facets/instructions/**
+!facets/output-contracts/
+!facets/output-contracts/**

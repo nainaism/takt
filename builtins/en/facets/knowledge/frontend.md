@@ -203,15 +203,55 @@ Exceptions (component-level fetching allowed):
 | Real-time updates | WebSocket/Polling auto-updates |
 | Modal detail fetch | Fetch additional data only when opened |
 
-Decision criteria: "Is there no point in parent managing this / Does it not affect parent?"
+Widget conditions (must satisfy all):
+- Completely unrelated to parent data
+- Does not affect parent state
+- Works the same on any page
+
+If any condition is not met, fetch data at View level and pass via props.
 
 | Criteria | Judgment |
 |----------|----------|
 | Direct fetch in component | Separate to Container layer |
 | No error handling | REJECT |
 | Loading state not handled | REJECT |
-| No cancellation handling | Warning |
 | N+1 query-like fetching | REJECT |
+
+### Screen-Specific API Usage
+
+Fetch data from screen-specific API endpoints. Do not assemble screens by repurposing generic APIs. If an API doesn't exist, add a backend endpoint first rather than working around it on the frontend.
+
+| Criteria | Judgment |
+|----------|----------|
+| Reusing list API response for detail screen | REJECT |
+| Display unit and API fetch unit mismatch | REJECT |
+| Fetching all records just for a decision (should use aggregation API) | REJECT |
+| Each screen has dedicated fetch endpoints returning only needed data | OK |
+
+```tsx
+// REJECT - Reusing list API for detail screen
+const DetailScreen = ({ itemId }) => {
+  const { data: list } = useListItems({ date })
+  const item = list?.items.find(i => i.id === itemId)
+  return <Detail item={item} />
+}
+
+// OK - Detail screen uses detail API
+const DetailScreen = ({ itemId }) => {
+  const { data: item } = useGetItem(itemId)
+  return <Detail item={item} />
+}
+```
+
+### Communication Scope Limitation
+
+Communication is scoped to the active tab/screen. Do not prefetch for other tabs. Periodic polling runs only on the visible screen.
+
+| Criteria | Judgment |
+|----------|----------|
+| Only visible tab communicates on tab switch | OK |
+| Parent fetches for all tabs and distributes to children | REJECT |
+| Polling continues on hidden tabs | REJECT |
 
 ## Shared Components and Abstraction
 

@@ -44,14 +44,18 @@ function buildTaskFileData(task: TaskRecord, content: string): TaskFileData {
     worktree: task.worktree,
     branch: task.branch,
     base_branch: task.base_branch,
-    piece: task.piece,
+    workflow: task.workflow,
     issue: task.issue,
-    start_movement: task.start_movement,
+    start_step: task.start_step,
     retry_note: task.retry_note,
     auto_pr: task.auto_pr,
     draft_pr: task.draft_pr,
-    exceeded_max_movements: task.exceeded_max_movements,
+    should_publish_branch_to_origin: task.should_publish_branch_to_origin,
+    exceeded_max_steps: task.exceeded_max_steps,
     exceeded_current_iteration: task.exceeded_current_iteration,
+    resume_point: task.resume_point,
+    source: task.source,
+    pr_number: task.pr_number,
   });
 }
 
@@ -65,6 +69,7 @@ export function toTaskInfo(projectDir: string, tasksFile: string, task: TaskReco
     filePath: tasksFile,
     name: task.name,
     slug: task.slug,
+    runSlug: task.run_slug,
     content,
     taskDir: task.task_dir,
     createdAt: task.created_at,
@@ -101,7 +106,7 @@ export function toExceededTaskItem(projectDir: string, tasksFile: string, task: 
   return {
     kind: 'exceeded',
     ...toBaseTaskListItem(projectDir, tasksFile, task),
-    exceededMaxMovements: task.exceeded_max_movements,
+    exceededMaxSteps: task.exceeded_max_steps,
     exceededCurrentIteration: task.exceeded_current_iteration,
   };
 }
@@ -120,13 +125,15 @@ function toCompletedTaskItem(projectDir: string, tasksFile: string, task: TaskRe
   };
 }
 
-function toBaseTaskListItem(projectDir: string, tasksFile: string, task: TaskRecord): Omit<TaskListItem, 'kind' | 'failure' | 'exceededMaxMovements' | 'exceededCurrentIteration'> {
+function toBaseTaskListItem(projectDir: string, tasksFile: string, task: TaskRecord): Omit<TaskListItem, 'kind' | 'failure' | 'exceededMaxSteps' | 'exceededCurrentIteration'> {
   return {
     name: task.name,
     createdAt: task.created_at,
     filePath: tasksFile,
     content: firstLine(resolveTaskContent(projectDir, task)),
     summary: task.summary,
+    taskDir: task.task_dir,
+    runSlug: task.run_slug,
     branch: task.branch,
     worktreePath: task.worktree_path,
     prUrl: task.pr_url,
@@ -135,6 +142,8 @@ function toBaseTaskListItem(projectDir: string, tasksFile: string, task: TaskRec
     ownerPid: task.owner_pid ?? undefined,
     data: toTaskData(projectDir, task),
     issueNumber: task.issue,
+    source: task.source,
+    prNumber: task.pr_number,
   };
 }
 

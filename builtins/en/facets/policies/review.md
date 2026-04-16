@@ -45,6 +45,12 @@ REJECT without exception if any of the following apply.
 - Replaced code/exports surviving after refactoring
 - Missing cross-validation of related fields (invariants of semantically coupled config values left unverified)
 
+A DRY finding is not complete unless the proposed consolidation target is also sound. A consolidation proposal is invalid unless all of the following hold.
+
+- The consolidation target matches existing responsibility boundaries and dependency direction
+- Any new public API, wrapper, or helper does not expand the existing contract unnaturally
+- If the proposal introduces abstraction not required by the task or plan, its necessity is explained with evidence
+
 ### Warning
 
 Not blocking, but improvement is recommended.
@@ -70,6 +76,18 @@ Always verify facts before raising an issue.
 | Search for call sites and usages with grep | Raise issues based on memory |
 | Cross-reference type definitions and schemas | Guess that code is dead |
 | Distinguish generated files (reports, etc.) from source | Review generated files as if they were source code |
+| Verify tool output is readable and uncorrupted | Raise issues based on garbled or abnormal output |
+| When claiming code is absent, read the target lines directly | Conclude "code doesn't exist" based on search results alone |
+
+### Tool Output Reliability
+
+If tool output is unreadable, re-read using a reliable method before making any judgment.
+
+| Situation | Action |
+|-----------|--------|
+| Output contains garbled text or encoding anomalies | Recognize the corruption, then re-read using an alternative method (open the file directly, specify line numbers for the target section) before judging |
+| Search command did not find the target code | Read the specific lines of the file directly to confirm absence before raising an issue. Search failure does not equal code absence |
+| Re-raising a prior finding without re-checking actual code | Must read current code before marking as persists. Do not re-raise from memory of the prior review |
 
 ## Writing Specific Feedback
 
@@ -78,6 +96,7 @@ Every issue raised must include the following.
 - **Which file and line number**
 - **What the problem is**
 - **How to fix it**
+- **If requesting abstraction or consolidation, why that placement is the natural one**
 
 ```
 ❌ "Review the structure"
@@ -99,6 +118,7 @@ To prevent circular rejections, track findings by ID.
 - Resolved issues must be listed with status `resolved`
 - Issues without `finding_id` are invalid (cannot be used as rejection grounds)
 - REJECT is allowed only when there is at least one `new` or `persists` issue
+- Before treating a prior finding as resolved, verify that the fix did not introduce a different structural or contract problem
 
 ## Reopen Conditions (`resolved` -> open)
 

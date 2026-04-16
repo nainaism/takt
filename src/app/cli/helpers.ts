@@ -66,3 +66,7 @@ export function resolveRemovedRootCommand(args: string[]): string | null {
   }
   return REMOVED_ROOT_COMMANDS.has(firstArg) ? firstArg : null;
 }
+
+export function resolveWorkflowCliOption(opts: Record<string, unknown>): string | undefined {
+  return typeof opts.workflow === 'string' ? opts.workflow : undefined;
+}

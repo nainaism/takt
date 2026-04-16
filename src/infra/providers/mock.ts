@@ -9,21 +9,18 @@ import type { AgentSetup, Provider, ProviderAgent, ProviderCallOptions } from '.
 function toMockOptions(options: ProviderCallOptions): MockCallOptions {
   return {
     cwd: options.cwd,
+    abortSignal: options.abortSignal,
     sessionId: options.sessionId,
     onStream: options.onStream,
+    allowedTools: options.allowedTools,
   };
 }
 
 /** Mock provider — deterministic responses for testing */
 export class MockProvider implements Provider {
-  setup(config: AgentSetup): ProviderAgent {
-    if (config.claudeAgent) {
-      throw new Error('Claude Code agent calls are not supported by the Mock provider');
-    }
-    if (config.claudeSkill) {
-      throw new Error('Claude Code skill calls are not supported by the Mock provider');
-    }
+  readonly supportsStructuredOutput = true;
 
+  setup(config: AgentSetup): ProviderAgent {
     const { name, systemPrompt } = config;
     if (systemPrompt) {
       return {

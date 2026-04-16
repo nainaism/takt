@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runTeamLeaderExecution } from '../core/piece/engine/team-leader-execution.js';
+import { runTeamLeaderExecution } from '../core/workflow/engine/team-leader-execution.js';
 import type { PartDefinition, PartResult } from '../core/models/types.js';
 
 function makePart(id: string): PartDefinition {
@@ -7,7 +7,6 @@ function makePart(id: string): PartDefinition {
     id,
     title: `title-${id}`,
     instruction: `do-${id}`,
-    timeoutMs: undefined,
   };
 }
 
@@ -33,7 +32,7 @@ describe('runTeamLeaderExecution', () => {
       .mockResolvedValueOnce({
         done: false,
         reasoning: 'need one more',
-        parts: [{ id: 'p3', title: 'title-p3', instruction: 'do-p3', timeoutMs: undefined }],
+        parts: [{ id: 'p3', title: 'title-p3', instruction: 'do-p3' }],
       })
       .mockResolvedValueOnce({
         done: true,
@@ -66,7 +65,7 @@ describe('runTeamLeaderExecution', () => {
     const requestMoreParts = vi.fn().mockResolvedValue({
       done: false,
       reasoning: 'duplicate only',
-      parts: [{ id: 'p1', title: 'dup', instruction: 'dup', timeoutMs: undefined }],
+      parts: [{ id: 'p1', title: 'dup', instruction: 'dup' }],
     });
 
     const result = await runTeamLeaderExecution({

@@ -84,22 +84,22 @@ describe('parseTarVerboseListing', () => {
     // Given: a regular .yaml file
     const lines = [
       bsdLine('d', 'repo-sha/'),
-      bsdLine('-', 'repo-sha/pieces/coder.yaml'),
+      bsdLine('-', 'repo-sha/workflows/coder.yaml'),
     ];
 
     const result = parseTarVerboseListing(lines);
-    expect(result.includePaths).toContain('repo-sha/pieces/coder.yaml');
+    expect(result.includePaths).toContain('repo-sha/workflows/coder.yaml');
   });
 
   it('should include .yml files', () => {
     // Given: a regular .yml file
     const lines = [
       bsdLine('d', 'repo-sha/'),
-      bsdLine('-', 'repo-sha/pieces/coder.yml'),
+      bsdLine('-', 'repo-sha/workflows/coder.yml'),
     ];
 
     const result = parseTarVerboseListing(lines);
-    expect(result.includePaths).toContain('repo-sha/pieces/coder.yml');
+    expect(result.includePaths).toContain('repo-sha/workflows/coder.yml');
   });
 
   it('should exclude files with non-allowed extensions (.ts, .json)', () => {

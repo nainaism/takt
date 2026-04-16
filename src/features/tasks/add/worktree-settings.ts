@@ -2,6 +2,7 @@ import { confirm, promptInput } from '../../../shared/prompt/index.js';
 import { info, success, error } from '../../../shared/ui/index.js';
 import { getErrorMessage } from '../../../shared/utils/index.js';
 import { getCurrentBranch, branchExists } from '../../../infra/task/index.js';
+import { sanitizeTerminalText } from '../../../shared/utils/text.js';
 
 export interface WorktreeSettings {
   worktree?: boolean | string;
@@ -14,18 +15,18 @@ export interface WorktreeSettings {
 export function displayTaskCreationResult(
   created: { taskName: string; tasksFile: string },
   settings: WorktreeSettings,
-  piece?: string,
+  workflow?: string,
 ): void {
-  success(`Task created: ${created.taskName}`);
-  info(`  File: ${created.tasksFile}`);
+  success(`Task created: ${sanitizeTerminalText(created.taskName)}`);
+  info(`  File: ${sanitizeTerminalText(created.tasksFile)}`);
   if (settings.worktree) {
-    info(`  Worktree: ${typeof settings.worktree === 'string' ? settings.worktree : 'auto'}`);
+    info(`  Worktree: ${typeof settings.worktree === 'string' ? sanitizeTerminalText(settings.worktree) : 'auto'}`);
   }
   if (settings.branch) {
-    info(`  Branch: ${settings.branch}`);
+    info(`  Branch: ${sanitizeTerminalText(settings.branch)}`);
   }
   if (settings.baseBranch) {
-    info(`  Base branch: ${settings.baseBranch}`);
+    info(`  Base branch: ${sanitizeTerminalText(settings.baseBranch)}`);
   }
   if (settings.autoPr) {
     info(`  Auto-PR: yes`);
@@ -33,7 +34,7 @@ export function displayTaskCreationResult(
   if (settings.draftPr) {
     info(`  Draft PR: yes`);
   }
-  if (piece) info(`  Piece: ${piece}`);
+  if (workflow) info(`  Workflow: ${sanitizeTerminalText(workflow)}`);
 }
 
 export async function promptWorktreeSettings(cwd: string): Promise<WorktreeSettings> {
@@ -46,8 +47,9 @@ export async function promptWorktreeSettings(cwd: string): Promise<WorktreeSetti
   let baseBranch: string | undefined;
 
   if (currentBranch && currentBranch !== 'main' && currentBranch !== 'master') {
+    const safeCurrentBranch = sanitizeTerminalText(currentBranch);
     const useCurrentAsBase = await confirm(
-      `現在のブランチ: ${currentBranch}\nBase branch として ${currentBranch} を使いますか？`,
+      `現在のブランチ: ${safeCurrentBranch}\nBase branch として ${safeCurrentBranch} を使いますか？`,
       true,
     );
     if (useCurrentAsBase) {
@@ -74,7 +76,7 @@ async function resolveExistingBaseBranch(cwd: string, initialBranch: string): Pr
     if (branchExists(cwd, candidate)) {
       return candidate;
     }
-    error(`Base branch does not exist: ${candidate}`);
+    error(`Base branch does not exist: ${sanitizeTerminalText(candidate)}`);
     const nextInput = await promptInput('Base branch (Enter for default)');
     candidate = nextInput ?? undefined;
   }

@@ -16,6 +16,7 @@ import {
   pullFromRemote,
 } from './taskActions.js';
 import { deleteTaskByKind, deleteAllTasks } from './taskDeleteActions.js';
+import { forceFailRunningTask } from './taskForceFailActions.js';
 import { retryFailedTask } from './taskRetryActions.js';
 import { listTasksNonInteractive, type ListNonInteractiveOptions } from './listNonInteractive.js';
 import { formatTaskStatusLabel, formatShortDate } from './taskStatusLabel.js';
@@ -40,7 +41,7 @@ export {
 
 type PendingTaskAction = 'delete';
 type ExceededTaskAction = 'requeue' | 'delete';
-
+type RunningTaskAction = 'force_fail';
 type FailedTaskAction = 'retry' | 'delete';
 type PrFailedTaskAction = ListAction;
 type CompletedTaskAction = ListAction;
@@ -51,8 +52,8 @@ async function showExceededTaskAndPromptAction(task: TaskListItem): Promise<Exce
   if (task.content) {
     info(`  ${task.content}`);
   }
-  if (task.exceededCurrentIteration !== undefined && task.exceededMaxMovements !== undefined) {
-    info(`  Iteration: ${task.exceededCurrentIteration}/${task.exceededMaxMovements}`);
+  if (task.exceededCurrentIteration !== undefined && task.exceededMaxSteps !== undefined) {
+    info(`  Iteration: ${task.exceededCurrentIteration}/${task.exceededMaxSteps}`);
   }
   blankLine();
 
@@ -79,6 +80,20 @@ async function showPendingTaskAndPromptAction(task: TaskListItem): Promise<Pendi
   );
 }
 
+async function showRunningTaskAndPromptAction(task: TaskListItem): Promise<RunningTaskAction | null> {
+  header(formatTaskStatusLabel(task));
+  info(`  Created: ${task.createdAt}`);
+  if (task.content) {
+    info(`  ${task.content}`);
+  }
+  blankLine();
+
+  return await selectOption<RunningTaskAction>(
+    `Action for ${task.name}:`,
+    [{ label: 'Mark as failed', value: 'force_fail', description: 'Mark stuck running task as failed' }],
+  );
+}
+
 async function showFailedTaskAndPromptAction(task: TaskListItem): Promise<FailedTaskAction | null> {
   header(formatTaskStatusLabel(task));
   info(`  Created: ${task.createdAt}`);
@@ -90,7 +105,7 @@ async function showFailedTaskAndPromptAction(task: TaskListItem): Promise<Failed
   return await selectOption<FailedTaskAction>(
     `Action for ${task.name}:`,
     [
-      { label: 'Retry', value: 'retry', description: 'Requeue task and select start movement' },
+      { label: 'Retry', value: 'retry', description: 'Requeue task and select start step' },
       { label: 'Delete', value: 'delete', description: 'Remove this task permanently' },
     ],
   );
@@ -180,14 +195,10 @@ export async function listTasks(
     } else if (type === 'running') {
       const task = tasks[idx];
       if (!task) continue;
-      header(formatTaskStatusLabel(task));
-      info(`  Created: ${task.createdAt}`);
-      if (task.content) {
-        info(`  ${task.content}`);
+      const taskAction = await showRunningTaskAndPromptAction(task);
+      if (taskAction === 'force_fail') {
+        await forceFailRunningTask(task, cwd);
       }
-      blankLine();
-      info('Running task is read-only.');
-      blankLine();
     } else if (type === 'completed') {
       const task = tasks[idx];
       if (!task) continue;
@@ -200,7 +211,7 @@ export async function listTasks(
 
       switch (taskAction) {
         case 'diff':
-          showFullDiff(cwd, task.branch);
+          showFullDiff(cwd, task);
           break;
         case 'instruct':
           await instructBranch(cwd, task);
@@ -253,7 +264,7 @@ export async function listTasks(
 
       switch (taskAction) {
         case 'diff':
-          showFullDiff(cwd, task.branch);
+          showFullDiff(cwd, task);
           break;
         case 'instruct':
           await instructBranch(cwd, task);

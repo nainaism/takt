@@ -1,4 +1,4 @@
-import type { MovementProviderOptions } from '../../core/models/piece-types.js';
+import type { StepProviderOptions } from '../../core/models/workflow-types.js';
 
 type ProviderBlockSandbox = {
   allow_unsandboxed_commands?: boolean;
@@ -12,14 +12,14 @@ export type ProviderBlockInput = {
   sandbox?: ProviderBlockSandbox;
 };
 
-export function normalizeProviderBlockOptions(provider: ProviderBlockInput): MovementProviderOptions | undefined {
+export function normalizeProviderBlockOptions(provider: ProviderBlockInput): StepProviderOptions | undefined {
   if (provider.type === 'codex' || provider.type === 'opencode') {
     if (provider.network_access === undefined) {
       return undefined;
     }
     return { [provider.type]: { networkAccess: provider.network_access } };
   }
-  if (provider.type === 'claude' && provider.sandbox) {
+  if ((provider.type === 'claude-sdk' || provider.type === 'claude') && provider.sandbox) {
     return {
       claude: {
         sandbox: {

@@ -15,10 +15,6 @@ export function getGlobalPersonasDir(): string {
   return join(getGlobalConfigDir(), 'personas');
 }
 
-export function getGlobalPiecesDir(): string {
-  return join(getGlobalConfigDir(), 'pieces');
-}
-
 export function getGlobalLogsDir(): string {
   return join(getGlobalConfigDir(), 'logs');
 }

@@ -33,6 +33,11 @@
 |---|------------|------------|--------------------------|---------------------|-------|----------------|
 | 1 | SEC-REOPENED-src-auth-L55 | injection-risk | `Previously fixed at src/auth.ts:20` | `Recurred at src/auth.ts:55` | Issue description | Fix approach |
 
+## Verification Evidence
+- Build: {Verified target, what was checked, and observed result; or state that it was unverified}
+- Tests: {Verified target, what was checked, and observed result; or state that it was unverified}
+- Functional check: {Verified target, what was checked, and observed result; or state that it was unverified}
+
 ## Warnings (non-blocking)
 - {Security recommendations}
 

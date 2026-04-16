@@ -8,15 +8,7 @@ vi.mock('../agents/runner.js', () => ({
   runAgent: vi.fn(),
 }));
 
-vi.mock('../agents/ai-judge.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../agents/ai-judge.js')>();
-  return {
-    ...original,
-    callAiJudge: vi.fn().mockResolvedValue(-1),
-  };
-});
-
-vi.mock('../core/piece/phase-runner.js', () => ({
+vi.mock('../core/workflow/phase-runner.js', () => ({
   needsStatusJudgmentPhase: vi.fn().mockReturnValue(false),
   runReportPhase: vi.fn().mockResolvedValue(undefined),
   runStatusJudgmentPhase: vi.fn().mockResolvedValue({ tag: '', ruleIndex: 0, method: 'auto_select' }),
@@ -45,27 +37,33 @@ function createEnv(): TestEnv {
   const globalDir = join(root, 'global');
 
   mkdirSync(projectDir, { recursive: true });
-  mkdirSync(join(projectDir, '.takt', 'pieces', 'personas'), { recursive: true });
+  mkdirSync(join(projectDir, '.takt', 'workflows', 'personas'), { recursive: true });
   mkdirSync(globalDir, { recursive: true });
 
   writeFileSync(
-    join(projectDir, '.takt', 'pieces', 'config-it.yaml'),
+    join(projectDir, '.takt', 'workflows', 'config-it.yaml'),
     [
       'name: config-it',
       'description: config provider options integration test',
-      'max_movements: 3',
-      'initial_movement: plan',
-      'movements:',
+      'max_steps: 3',
+      'initial_step: plan',
+      'steps:',
       '  - name: plan',
       '    persona: ./personas/planner.md',
       '    instruction: "{task}"',
+      '    provider_options:',
+      '      codex:',
+      '        network_access: true',
+      '      claude:',
+      '        sandbox:',
+      '          allow_unsandboxed_commands: false',
       '    rules:',
       '      - condition: done',
       '        next: COMPLETE',
     ].join('\n'),
     'utf-8',
   );
-  writeFileSync(join(projectDir, '.takt', 'pieces', 'personas', 'planner.md'), 'You are planner.', 'utf-8');
+  writeFileSync(join(projectDir, '.takt', 'workflows', 'personas', 'planner.md'), 'You are planner.', 'utf-8');
 
   return { projectDir, globalDir };
 }
@@ -141,13 +139,16 @@ describe('IT: config provider_options reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'config-it',
+      workflowIdentifier: 'config-it',
     });
 
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.providerOptions).toEqual({
+    expect(options?.providerOptions).toMatchObject({
       codex: { networkAccess: true },
+      claude: {
+        sandbox: { allowUnsandboxedCommands: false },
+      },
     });
   });
 
@@ -156,7 +157,7 @@ describe('IT: config provider_options reflection', () => {
       env.globalDir,
       [
         'provider_options:',
-        '  codex:',
+        '  opencode:',
         '    network_access: true',
       ].join('\n'),
     );
@@ -164,7 +165,7 @@ describe('IT: config provider_options reflection', () => {
       env.projectDir,
       [
         'provider_options:',
-        '  codex:',
+        '  opencode:',
         '    network_access: false',
       ].join('\n'),
     );
@@ -173,13 +174,16 @@ describe('IT: config provider_options reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'config-it',
+      workflowIdentifier: 'config-it',
     });
 
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.providerOptions).toEqual({
-      codex: { networkAccess: false },
+    expect(options?.providerOptions).toMatchObject({
+      opencode: { networkAccess: false },
+      claude: {
+        sandbox: { allowUnsandboxedCommands: false },
+      },
     });
   });
 
@@ -199,13 +203,48 @@ describe('IT: config provider_options reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'config-it',
+      workflowIdentifier: 'config-it',
     });
 
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.providerOptions).toEqual({
+    expect(options?.providerOptions).toMatchObject({
       codex: { networkAccess: false },
+      claude: {
+        sandbox: { allowUnsandboxedCommands: false },
+      },
+    });
+  });
+
+  it('should preserve provider options origin precedence through executeTask to WorkflowEngine', async () => {
+    setGlobalConfig(
+      env.globalDir,
+      [
+        'provider_options:',
+        '  codex:',
+        '    network_access: false',
+        '  claude:',
+        '    sandbox:',
+        '      allow_unsandboxed_commands: true',
+      ].join('\n'),
+    );
+    process.env.TAKT_PROVIDER_OPTIONS_CODEX_NETWORK_ACCESS = 'true';
+    invalidateGlobalConfigCache();
+
+    const ok = await executeTask({
+      task: 'test task',
+      cwd: env.projectDir,
+      projectCwd: env.projectDir,
+      workflowIdentifier: 'config-it',
+    });
+
+    expect(ok).toBe(true);
+    const options = vi.mocked(runAgent).mock.calls[0]?.[2];
+    expect(options?.providerOptions).toMatchObject({
+      codex: { networkAccess: true },
+      claude: {
+        sandbox: { allowUnsandboxedCommands: false },
+      },
     });
   });
 });

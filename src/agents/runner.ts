@@ -2,19 +2,19 @@
  * Agent execution runners
  */
 
-import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import {
   loadCustomAgents,
   loadAgentPrompt,
   loadGlobalConfig,
+  loadPersonaPromptFromPath,
   loadProjectConfig,
   resolveConfigValue,
 } from '../infra/config/index.js';
 import { getProvider, type ProviderType, type ProviderCallOptions } from '../infra/providers/index.js';
 import type { AgentResponse, CustomAgentConfig } from '../core/models/index.js';
-import { resolveAgentProviderModel } from '../core/piece/provider-resolution.js';
-import { DEFAULT_PROVIDER_PERMISSION_PROFILES, resolveMovementPermissionMode } from '../core/piece/permission-profile-resolution.js';
+import { resolveAgentProviderModel } from '../core/workflow/provider-resolution.js';
+import { DEFAULT_PROVIDER_PERMISSION_PROFILES, resolveStepPermissionMode } from '../core/workflow/permission-profile-resolution.js';
 import { createLogger } from '../shared/utils/index.js';
 import { loadTemplate } from '../shared/prompts/index.js';
 import type { RunAgentOptions } from './types.js';
@@ -42,14 +42,20 @@ export class AgentRunner {
   } {
     const localConfig = loadProjectConfig(cwd);
     const globalConfig = loadGlobalConfig();
+    if (options?.resolvedProvider) {
+      return {
+        provider: options.resolvedProvider,
+        model: options.resolvedModel,
+        localConfig,
+        globalConfig,
+      };
+    }
     const personaProviders = resolveConfigValue(cwd, 'personaProviders');
     const resolved = resolveAgentProviderModel({
       cliProvider: options?.provider,
       cliModel: options?.model,
       personaProviders,
       personaDisplayName,
-      stepProvider: options?.stepProvider,
-      stepModel: options?.stepModel,
       localProvider: localConfig.provider,
       localModel: localConfig.model,
       globalProvider: globalConfig.provider,
@@ -65,14 +71,6 @@ export class AgentRunner {
       localConfig,
       globalConfig,
     };
-  }
-
-  /** Load persona prompt from file path */
-  private static loadPersonaPromptFromPath(personaPath: string): string {
-    if (!existsSync(personaPath)) {
-      throw new Error(`Persona file not found: ${personaPath}`);
-    }
-    return readFileSync(personaPath, 'utf-8');
   }
 
   /**
@@ -134,8 +132,8 @@ export class AgentRunner {
     globalConfig: ReturnType<typeof loadGlobalConfig>,
   ): RunAgentOptions['permissionMode'] {
     if (options.permissionResolution) {
-      return resolveMovementPermissionMode({
-        movementName: options.permissionResolution.movementName,
+      return resolveStepPermissionMode({
+        stepName: options.permissionResolution.stepName,
         requiredPermissionMode: options.permissionResolution.requiredPermissionMode,
         provider: resolvedProvider,
         projectProviderProfiles: options.permissionResolution.providerProfiles
@@ -156,21 +154,16 @@ export class AgentRunner {
     const resolved = AgentRunner.resolveProviderAndModel(options.cwd, agentConfig.name, options);
     const providerType = resolved.provider;
     const provider = getProvider(providerType);
-
-    const resolvedSystemPrompt = agentConfig.claudeAgent || agentConfig.claudeSkill
-      ? undefined
-      : loadAgentPrompt(agentConfig, options.cwd);
+    const resolvedSystemPrompt = loadAgentPrompt(agentConfig, options.cwd);
 
     options.onPromptResolved?.({
-      systemPrompt: resolvedSystemPrompt ?? '',
+      systemPrompt: resolvedSystemPrompt,
       userInstruction: task,
     });
 
     const agent = provider.setup({
       name: agentConfig.name,
       systemPrompt: resolvedSystemPrompt,
-      claudeAgent: agentConfig.claudeAgent,
-      claudeSkill: agentConfig.claudeSkill,
     });
 
     const customOptions: RunAgentOptions = {
@@ -199,6 +192,8 @@ export class AgentRunner {
       personaName,
       provider: options.provider,
       model: options.model,
+      resolvedProvider: options.resolvedProvider,
+      resolvedModel: options.resolvedModel,
       hasPersonaPath: !!options.personaPath,
       hasSession: !!options.sessionId,
       permissionMode: options.permissionMode,
@@ -218,18 +213,21 @@ export class AgentRunner {
     // 1. If personaPath is provided (resolved file exists), load prompt from file
     //    and wrap it through the perform_agent_system_prompt template
     if (options.personaPath) {
-      const agentDefinition = AgentRunner.loadPersonaPromptFromPath(options.personaPath);
+      const agentDefinition = loadPersonaPromptFromPath(
+        options.personaPath,
+        options.projectCwd ?? options.cwd,
+      );
       const language = options.language ?? 'en';
       const templateVars: Record<string, string> = { agentDefinition };
 
-      if (options.pieceMeta) {
-        templateVars.pieceName = options.pieceMeta.pieceName;
-        templateVars.pieceDescription = options.pieceMeta.pieceDescription ?? '';
-        templateVars.currentMovement = options.pieceMeta.currentMovement;
-        templateVars.movementsList = options.pieceMeta.movementsList
+      if (options.workflowMeta) {
+        templateVars.workflowName = options.workflowMeta.workflowName;
+        templateVars.workflowDescription = options.workflowMeta.workflowDescription ?? '';
+        templateVars.currentStep = options.workflowMeta.currentStep;
+        templateVars.stepsList = options.workflowMeta.stepsList
           .map((m, i) => `${i + 1}. ${m.name}${m.description ? ` - ${m.description}` : ''}`)
           .join('\n');
-        templateVars.currentPosition = options.pieceMeta.currentPosition;
+        templateVars.currentPosition = options.workflowMeta.currentPosition;
       }
 
       const systemPrompt = loadTemplate('perform_agent_system_prompt', language, templateVars);
@@ -258,7 +256,7 @@ export class AgentRunner {
       return agent.call(task, callOptions);
     }
 
-    // 3. No persona specified — run with instruction_template only (no system prompt)
+    // 3. No persona specified — run with the resolved instruction only (no system prompt)
     options.onPromptResolved?.({
       systemPrompt: '',
       userInstruction: task,

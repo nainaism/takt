@@ -15,12 +15,13 @@ import {
 import { createLogger } from '../../shared/utils/index.js';
 import { info, error, blankLine } from '../../shared/ui/index.js';
 import { getLabel, getLabelObject } from '../../shared/i18n/index.js';
-import { readMultilineInput } from './lineEditor.js';
+import { readInteractiveInput } from './interactiveInput.js';
+import type { CommandAvailability } from './slashCommandRegistry.js';
 import { selectRecentSession } from './sessionSelector.js';
 import { matchSlashCommand } from './commandMatcher.js';
 import { SlashCommand } from '../../shared/constants.js';
 import {
-  type PieceContext,
+  type WorkflowContext,
   type InteractiveModeResult,
   type InteractiveUIText,
   type ConversationMessage,
@@ -83,7 +84,7 @@ export async function runConversationLoop(
   cwd: string,
   ctx: SessionContext,
   strategy: ConversationStrategy,
-  pieceContext: PieceContext | undefined,
+  workflowContext: WorkflowContext | undefined,
   initialInput: string | undefined,
 ): Promise<InteractiveModeResult> {
   const history: ConversationMessage[] = [];
@@ -126,8 +127,13 @@ export async function runConversationLoop(
     return { action: selectedAction, task };
   }
 
+  const commandAvailability: CommandAvailability = {
+    enableRetryCommand: strategy.enableRetryCommand,
+    hasPreviousOrder: !!strategy.previousOrderContent,
+  };
+
   while (true) {
-    const input = await readMultilineInput(chalk.green('> '));
+    const input = await readInteractiveInput(chalk.green('> '), ctx.lang, commandAvailability);
 
     if (input === null) {
       blankLine();
@@ -199,7 +205,7 @@ export async function runConversationLoop(
       case SlashCommand.Go: {
         const userNote = match.text;
         let summaryPrompt = buildSummaryPrompt(
-          history, !!sessionId, ctx.lang, noTranscript, conversationLabel, pieceContext,
+          history, !!sessionId, ctx.lang, noTranscript, conversationLabel, workflowContext,
         );
         if (!summaryPrompt) {
           info(ui.noConversation);

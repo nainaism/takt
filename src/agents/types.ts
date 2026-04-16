@@ -7,42 +7,44 @@ import type {
   PermissionMode,
   Language,
   McpServerConfig,
-  MovementProviderOptions,
+  StepProviderOptions,
   ProviderPermissionProfiles,
 } from '../core/models/index.js';
+import type { ProviderType } from '../shared/types/provider.js';
 
 export type { StreamCallback };
 
 /** Common options for running agents */
 export interface RunAgentOptions {
   cwd: string;
+  projectCwd?: string;
   abortSignal?: AbortSignal;
   sessionId?: string;
   model?: string;
-  provider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
-  stepModel?: string;
-  stepProvider?: 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+  provider?: ProviderType;
+  resolvedModel?: string;
+  resolvedProvider?: ProviderType;
   personaPath?: string;
   allowedTools?: string[];
   mcpServers?: Record<string, McpServerConfig>;
   maxTurns?: number;
   permissionMode?: PermissionMode;
   permissionResolution?: {
-    movementName: string;
+    stepName: string;
     requiredPermissionMode?: PermissionMode;
     providerProfiles?: ProviderPermissionProfiles;
   };
-  providerOptions?: MovementProviderOptions;
+  providerOptions?: StepProviderOptions;
   onStream?: StreamCallback;
   onPermissionRequest?: PermissionHandler;
   onAskUserQuestion?: AskUserQuestionHandler;
   bypassPermissions?: boolean;
   language?: Language;
-  pieceMeta?: {
-    pieceName: string;
-    pieceDescription?: string;
-    currentMovement: string;
-    movementsList: ReadonlyArray<{ name: string; description?: string }>;
+  workflowMeta?: {
+    workflowName: string;
+    workflowDescription?: string;
+    currentStep: string;
+    stepsList: ReadonlyArray<{ name: string; description?: string }>;
     currentPosition: string;
   };
   outputSchema?: Record<string, unknown>;

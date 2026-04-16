@@ -153,6 +153,21 @@ Legacy support criteria:
 - Do not add `.transform()` normalization, `LEGACY_*_MAP` mappings, or `@deprecated` type definitions
 - Support only new values and keep it simple
 
+## Premature Caching Strategy Introduction
+
+AI tends to proactively introduce caching mechanisms to "improve" performance. Do not add caching strategies until explicitly requested.
+
+| Pattern | Example | Verdict |
+|---------|---------|---------|
+| Adding cache layer to data fetching | stale-while-revalidate config, in-memory cache, Redis introduction | REJECT |
+| Saving cache locally | Storing API responses in local storage or files for reuse | REJECT |
+| Memoization without measurement | Excessive memoization without identifying bottlenecks | REJECT |
+| Custom cache invalidation implementation | Adding TTL, cache key management, purge mechanisms | REJECT |
+
+Decision criteria: Is there an explicit request or measurement result indicating "caching is needed"?
+- YES → OK to implement
+- NO → Do not implement. Naive data fetching is sufficient
+
 ## Dead Code Detection
 
 AI adds new code but often forgets to remove code that is no longer needed.

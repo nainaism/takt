@@ -1,73 +1,53 @@
-/**
- * Tests for parallel movement execution and ai() condition loader
- *
- * Covers:
- * - Schema validation for parallel sub-movements
- * - Piece loader normalization of ai() conditions and parallel movements
- * - Engine parallel movement aggregation logic
- */
-
 import { describe, it, expect } from 'vitest';
 import {
-  PieceConfigRawSchema,
-  ParallelSubMovementRawSchema,
-  PieceMovementRawSchema,
+  WorkflowConfigRawSchema,
+  ParallelSubStepRawSchema,
+  WorkflowStepRawSchema,
   LoopMonitorJudgeSchema,
 } from '../core/models/index.js';
 
-describe('ParallelSubMovementRawSchema', () => {
-  it('should validate a valid parallel sub-movement', () => {
+describe('ParallelSubStepRawSchema', () => {
+  it('should validate a valid parallel sub-step', () => {
     const raw = {
       name: 'arch-review',
       persona: '~/.takt/agents/default/reviewer.md',
-      instruction_template: 'Review architecture',
+      instruction: 'Review architecture',
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept a sub-movement without persona (instruction_template only)', () => {
-    const raw = {
-      name: 'no-agent-step',
-      instruction_template: 'Do something',
-    };
-
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-  });
-
-  it('should accept a sub-movement with instruction field', () => {
-    // Given: a parallel sub-movement that uses the new canonical field
+  it('should accept a sub-step without persona', () => {
     const raw = {
       name: 'no-agent-step',
       instruction: 'Do something',
     };
 
-    // When: validating the sub-movement schema
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
-
-    // Then: it is accepted
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept a sub-movement when instruction and instruction_template are both provided', () => {
-    // Given: both canonical and deprecated fields are present during migration
+  it('should accept a sub-step with instruction field', () => {
+    const raw = {
+      name: 'no-agent-step',
+      instruction: 'Do something',
+    };
+
+    const result = ParallelSubStepRawSchema.safeParse(raw);
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject a sub-step when instruction_template is provided', () => {
     const raw = {
       name: 'dual-field-sub-step',
-      instruction: 'Canonical instruction',
       instruction_template: 'Legacy instruction',
     };
 
-    // When: validating the sub-movement schema
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
 
-    // Then: schema keeps backward compatibility and accepts both fields
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as unknown as Record<string, unknown>).instruction).toBe('Canonical instruction');
-      expect((result.data as unknown as Record<string, unknown>).instruction_template).toBe('Legacy instruction');
-    }
+    expect(result.success).toBe(false);
   });
 
   it('should accept optional fields', () => {
@@ -82,12 +62,12 @@ describe('ParallelSubMovementRawSchema', () => {
       },
       model: 'haiku',
       edit: false,
-      instruction_template: 'Do work',
+      instruction: 'Do work',
       report: '01-report.md',
       pass_previous_response: false,
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.persona_name).toBe('Coder');
@@ -96,7 +76,7 @@ describe('ParallelSubMovementRawSchema', () => {
     }
   });
 
-  it('should accept provider block in parallel sub-movement', () => {
+  it('should accept provider block in parallel sub-step', () => {
     const raw = {
       name: 'provider-block-sub-step',
       provider: {
@@ -104,200 +84,193 @@ describe('ParallelSubMovementRawSchema', () => {
         model: 'gpt-5.3',
         network_access: true,
       },
-      instruction_template: 'Review',
+      instruction: 'Review',
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should reject invalid provider block options in parallel sub-movement', () => {
+  it('should reject invalid provider block options in parallel sub-step', () => {
     const raw = {
       name: 'invalid-provider-block-sub-step',
       provider: {
         type: 'claude',
         network_access: true,
       },
-      instruction_template: 'Review',
+      instruction: 'Review',
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 
-  it('should accept rules on sub-movements', () => {
+  it('should accept rules on sub-steps', () => {
     const raw = {
       name: 'reviewed',
       persona: '~/.takt/agents/default/reviewer.md',
-      instruction_template: 'Review',
+      instruction: 'Review',
       rules: [
         { condition: 'No issues', next: 'COMPLETE' },
         { condition: 'Issues found', next: 'fix' },
       ],
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.rules).toHaveLength(2);
     }
   });
 
-  it('should reject movement-level allowed_tools on sub-movement', () => {
+  it('should reject step-level allowed_tools on sub-step', () => {
     const raw = {
       name: 'invalid-sub-step',
       allowed_tools: ['Read'],
-      instruction_template: 'Review',
+      instruction: 'Review',
     };
 
-    const result = ParallelSubMovementRawSchema.safeParse(raw);
+    const result = ParallelSubStepRawSchema.safeParse(raw);
     expect(result.success).toBe(false);
   });
 });
 
-describe('PieceMovementRawSchema with parallel', () => {
-  it('should accept a movement with parallel sub-movements (no agent)', () => {
+describe('WorkflowStepRawSchema with parallel', () => {
+  it('should accept a step with parallel sub-steps (no agent)', () => {
     const raw = {
       name: 'parallel-review',
       parallel: [
-        { name: 'arch-review', persona: 'reviewer.md', instruction_template: 'Review arch' },
-        { name: 'sec-review', persona: 'security.md', instruction_template: 'Review security' },
+        { name: 'arch-review', persona: 'reviewer.md', instruction: 'Review arch' },
+        { name: 'sec-review', persona: 'security.md', instruction: 'Review security' },
       ],
       rules: [
         { condition: 'All pass', next: 'COMPLETE' },
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept a movement with neither agent nor parallel (instruction_template only)', () => {
-    const raw = {
-      name: 'orphan-step',
-      instruction_template: 'Do something',
-    };
-
-    const result = PieceMovementRawSchema.safeParse(raw);
-    expect(result.success).toBe(true);
-  });
-
-  it('should accept a movement with instruction only', () => {
-    // Given: a movement that only uses instruction
+  it('should accept a step with neither agent nor parallel', () => {
     const raw = {
       name: 'orphan-step',
       instruction: 'Do something',
     };
 
-    // When: validating the movement schema
-    const result = PieceMovementRawSchema.safeParse(raw);
-
-    // Then: it is accepted
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept a movement when instruction and instruction_template are both provided', () => {
-    // Given: movement includes both canonical and deprecated instruction fields
+  it('should accept a step with instruction only', () => {
     const raw = {
       name: 'orphan-step',
-      instruction: 'Canonical movement instruction',
-      instruction_template: 'Legacy movement instruction',
+      instruction: 'Do something',
     };
 
-    // When: validating the movement schema
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
 
-    // Then: schema accepts both fields for deprecation window
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as unknown as Record<string, unknown>).instruction).toBe('Canonical movement instruction');
-      expect((result.data as unknown as Record<string, unknown>).instruction_template).toBe('Legacy movement instruction');
-    }
   });
 
-  it('should accept a movement with persona (no parallel)', () => {
+  it('should reject a step when instruction_template is provided', () => {
+    const raw = {
+      name: 'orphan-step',
+      instruction_template: 'Legacy step instruction',
+    };
+
+    const result = WorkflowStepRawSchema.safeParse(raw);
+
+    expect(result.success).toBe(false);
+  });
+
+  it('should accept a step with persona (no parallel)', () => {
     const raw = {
       name: 'normal-step',
       persona: 'coder.md',
-      instruction_template: 'Code something',
+      instruction: 'Code something',
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept a movement with empty parallel array (no agent, no parallel content)', () => {
+  it('should accept a step with empty parallel array (no agent, no parallel content)', () => {
     const raw = {
       name: 'empty-parallel',
       parallel: [],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 
-  it('should accept provider string in parallel sub-movement', () => {
+  it('should accept provider string in parallel sub-step', () => {
     const raw = {
       name: 'parallel-provider-string',
       parallel: [
         {
           name: 'arch-review',
           provider: 'codex',
-          instruction_template: 'Review architecture',
+          instruction: 'Review architecture',
         },
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 });
 
 describe('LoopMonitorJudgeSchema', () => {
   it('should accept judge configuration with instruction field', () => {
-    // Given: a loop monitor judge with canonical instruction
     const raw = {
       persona: 'reviewer',
       instruction: 'Judge loop health',
       rules: [{ condition: 'continue', next: 'ai_fix' }],
     };
 
-    // When: validating judge schema
     const result = LoopMonitorJudgeSchema.safeParse(raw);
 
-    // Then: it is accepted
     expect(result.success).toBe(true);
     if (result.success) {
       expect((result.data as unknown as Record<string, unknown>).instruction).toBe('Judge loop health');
     }
   });
 
-  it('should accept judge configuration during deprecation window when both fields exist', () => {
-    // Given: judge config with both new and deprecated fields
+  it('should accept judge configuration with provider block', () => {
+    const raw = {
+      provider: {
+        type: 'codex',
+        model: 'gpt-5.2-codex',
+        network_access: true,
+      },
+      rules: [{ condition: 'continue', next: 'ai_fix' }],
+    };
+
+    const result = LoopMonitorJudgeSchema.safeParse(raw);
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject judge configuration when instruction_template exists', () => {
     const raw = {
       persona: 'reviewer',
-      instruction: 'Judge loop health',
       instruction_template: 'legacy judge instruction',
       rules: [{ condition: 'continue', next: 'ai_fix' }],
     };
 
-    // When: validating judge schema
     const result = LoopMonitorJudgeSchema.safeParse(raw);
 
-    // Then: it is accepted for backward compatibility
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect((result.data as unknown as Record<string, unknown>).instruction).toBe('Judge loop health');
-      expect((result.data as unknown as Record<string, unknown>).instruction_template).toBe('legacy judge instruction');
-    }
+    expect(result.success).toBe(false);
   });
 });
 
-describe('PieceConfigRawSchema with parallel movements', () => {
-  it('should validate a piece with parallel movement', () => {
+describe('WorkflowConfigRawSchema with parallel steps', () => {
+  it('should validate a workflow with parallel step', () => {
     const raw = {
-      name: 'test-parallel-piece',
-      movements: [
+      name: 'test-parallel-workflow',
+      steps: [
         {
           name: 'plan',
           persona: 'planner.md',
@@ -306,8 +279,8 @@ describe('PieceConfigRawSchema with parallel movements', () => {
         {
           name: 'review',
           parallel: [
-            { name: 'arch-review', persona: 'arch-reviewer.md', instruction_template: 'Review architecture' },
-            { name: 'sec-review', persona: 'sec-reviewer.md', instruction_template: 'Review security' },
+            { name: 'arch-review', persona: 'arch-reviewer.md', instruction: 'Review architecture' },
+            { name: 'sec-review', persona: 'sec-reviewer.md', instruction: 'Review security' },
           ],
           rules: [
             { condition: 'All approved', next: 'COMPLETE' },
@@ -315,22 +288,22 @@ describe('PieceConfigRawSchema with parallel movements', () => {
           ],
         },
       ],
-      initial_movement: 'plan',
-      max_movements: 10,
+      initial_step: 'plan',
+      max_steps: 10,
     };
 
-    const result = PieceConfigRawSchema.safeParse(raw);
+    const result = WorkflowConfigRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.movements).toHaveLength(2);
-      expect(result.data.movements[1].parallel).toHaveLength(2);
+      expect(result.data.steps).toHaveLength(2);
+      expect(result.data.steps[1].parallel).toHaveLength(2);
     }
   });
 
-  it('should validate a piece mixing normal and parallel movements', () => {
+  it('should validate a workflow mixing normal and parallel steps', () => {
     const raw = {
-      name: 'mixed-piece',
-      movements: [
+      name: 'mixed-workflow',
+      steps: [
         { name: 'plan', persona: 'planner.md', rules: [{ condition: 'Done', next: 'implement' }] },
         { name: 'implement', persona: 'coder.md', rules: [{ condition: 'Done', next: 'review' }] },
         {
@@ -342,19 +315,19 @@ describe('PieceConfigRawSchema with parallel movements', () => {
           rules: [{ condition: 'All pass', next: 'COMPLETE' }],
         },
       ],
-      initial_movement: 'plan',
+      initial_step: 'plan',
     };
 
-    const result = PieceConfigRawSchema.safeParse(raw);
+    const result = WorkflowConfigRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.movements[0].persona).toBe('planner.md');
-      expect(result.data.movements[2].parallel).toHaveLength(2);
+      expect(result.data.steps[0].persona).toBe('planner.md');
+      expect(result.data.steps[2].parallel).toHaveLength(2);
     }
   });
 });
 
-describe('ai() condition in PieceRuleSchema', () => {
+describe('ai() condition in WorkflowRuleSchema', () => {
   it('should accept ai() condition as a string', () => {
     const raw = {
       name: 'test-step',
@@ -365,7 +338,7 @@ describe('ai() condition in PieceRuleSchema', () => {
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.rules?.[0].condition).toBe('ai("All reviews approved")');
@@ -383,13 +356,13 @@ describe('ai() condition in PieceRuleSchema', () => {
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 });
 
 describe('ai() condition regex parsing', () => {
-  // Test the regex pattern used in pieceLoader.ts
+  // Test the regex pattern used in workflowParser.ts
   const AI_CONDITION_REGEX = /^ai\("(.+)"\)$/;
 
   it('should match simple ai() condition', () => {
@@ -470,12 +443,12 @@ describe('all()/any() aggregate condition regex parsing', () => {
   });
 });
 
-describe('all()/any() condition in PieceMovementRawSchema', () => {
+describe('all()/any() condition in WorkflowStepRawSchema', () => {
   it('should accept all() condition as a string', () => {
     const raw = {
       name: 'parallel-review',
       parallel: [
-        { name: 'arch-review', persona: 'reviewer.md', instruction_template: 'Review' },
+        { name: 'arch-review', persona: 'reviewer.md', instruction: 'Review' },
       ],
       rules: [
         { condition: 'all("approved")', next: 'COMPLETE' },
@@ -483,7 +456,7 @@ describe('all()/any() condition in PieceMovementRawSchema', () => {
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.rules?.[0].condition).toBe('all("approved")');
@@ -504,7 +477,7 @@ describe('all()/any() condition in PieceMovementRawSchema', () => {
       ],
     };
 
-    const result = PieceMovementRawSchema.safeParse(raw);
+    const result = WorkflowStepRawSchema.safeParse(raw);
     expect(result.success).toBe(true);
   });
 });
@@ -540,7 +513,7 @@ describe('aggregate condition evaluation logic', () => {
     { condition: 'rejected' },
   ];
 
-  it('all(): true when all sub-movements match', () => {
+  it('all(): true when all sub-steps match', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: 0, rules },
@@ -548,7 +521,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('all', 'approved', subs)).toBe(true);
   });
 
-  it('all(): false when some sub-movements do not match', () => {
+  it('all(): false when some sub-steps do not match', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: 1, rules },
@@ -556,7 +529,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('all', 'approved', subs)).toBe(false);
   });
 
-  it('all(): false when sub-movement has no matched rule', () => {
+  it('all(): false when sub-step has no matched rule', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: undefined, rules },
@@ -564,7 +537,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('all', 'approved', subs)).toBe(false);
   });
 
-  it('all(): false when sub-movement has no rules', () => {
+  it('all(): false when sub-step has no rules', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: 0, rules: undefined },
@@ -572,11 +545,11 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('all', 'approved', subs)).toBe(false);
   });
 
-  it('all(): false with zero sub-movements', () => {
+  it('all(): false with zero sub-steps', () => {
     expect(evaluateAggregate('all', 'approved', [])).toBe(false);
   });
 
-  it('any(): true when one sub-movement matches', () => {
+  it('any(): true when one sub-step matches', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: 1, rules },
@@ -584,7 +557,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('any', 'rejected', subs)).toBe(true);
   });
 
-  it('any(): true when all sub-movements match', () => {
+  it('any(): true when all sub-steps match', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 1, rules },
       { name: 'b', matchedRuleIndex: 1, rules },
@@ -592,7 +565,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('any', 'rejected', subs)).toBe(true);
   });
 
-  it('any(): false when no sub-movements match', () => {
+  it('any(): false when no sub-steps match', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: 0, rules },
       { name: 'b', matchedRuleIndex: 0, rules },
@@ -600,11 +573,11 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('any', 'rejected', subs)).toBe(false);
   });
 
-  it('any(): false with zero sub-movements', () => {
+  it('any(): false with zero sub-steps', () => {
     expect(evaluateAggregate('any', 'rejected', [])).toBe(false);
   });
 
-  it('any(): skips sub-movements without matched rule (does not count as match)', () => {
+  it('any(): skips sub-steps without matched rule (does not count as match)', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: undefined, rules },
       { name: 'b', matchedRuleIndex: 1, rules },
@@ -612,7 +585,7 @@ describe('aggregate condition evaluation logic', () => {
     expect(evaluateAggregate('any', 'rejected', subs)).toBe(true);
   });
 
-  it('any(): false when only unmatched sub-movements exist', () => {
+  it('any(): false when only unmatched sub-steps exist', () => {
     const subs: SubResult[] = [
       { name: 'a', matchedRuleIndex: undefined, rules },
       { name: 'b', matchedRuleIndex: undefined, rules },
@@ -644,8 +617,8 @@ describe('aggregate condition evaluation logic', () => {
   });
 });
 
-describe('parallel movement aggregation format', () => {
-  it('should aggregate sub-movement outputs in the expected format', () => {
+describe('parallel step aggregation format', () => {
+  it('should aggregate sub-step outputs in the expected format', () => {
     // Mirror the aggregation logic from engine.ts
     const subResults = [
       { name: 'arch-review', content: 'Architecture looks good.\n## Result: APPROVE' },
@@ -663,7 +636,7 @@ describe('parallel movement aggregation format', () => {
     expect(aggregatedContent).toContain('No security issues.');
   });
 
-  it('should handle single sub-movement', () => {
+  it('should handle single sub-step', () => {
     const subResults = [
       { name: 'only-step', content: 'Single result' },
     ];
@@ -676,7 +649,7 @@ describe('parallel movement aggregation format', () => {
     expect(aggregatedContent).not.toContain('---');
   });
 
-  it('should handle empty content from sub-movements', () => {
+  it('should handle empty content from sub-steps', () => {
     const subResults = [
       { name: 'step-a', content: '' },
       { name: 'step-b', content: 'Has content' },

@@ -1,20 +1,3 @@
-/**
- * Integration tests for worktree exceeded → requeue → re-execution flow.
- *
- * Scenarios:
- * 1. Worktree task reaches iteration limit → transitions to 'exceeded' status
- * 2. Exceeded task stores start_movement / exceeded_max_movements / exceeded_current_iteration
- * 3. After requeue, re-execution passes maxMovementsOverride and initialIterationOverride
- * 4. After requeue, re-execution starts from start_movement (re-entry point)
- *
- * Integration boundary:
- *   TaskRunner (real file I/O) →
- *   executeAndCompleteTask →
- *     resolveTaskExecution →
- *     executeTaskWithResult →
- *     executePiece (mocked, args captured)
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,22 +5,30 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
-// --- Mock setup (must be before imports that use these modules) ---
+// --- Mock setup ---
 
 vi.mock('../infra/config/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../infra/config/index.js')>();
   return {
     ...actual,
-    loadPieceByIdentifier: vi.fn(),
-    isPiecePath: vi.fn().mockReturnValue(false),
-    resolvePieceConfigValues: vi.fn().mockReturnValue({}),
-    resolveConfigValueWithSource: vi.fn().mockReturnValue({ value: undefined, source: 'global' }),
-    resolvePieceConfigValue: vi.fn().mockReturnValue(undefined),
+    loadWorkflowByIdentifier: vi.fn(),
+    isWorkflowPath: vi.fn().mockReturnValue(false),
+    resolveWorkflowConfigValues: vi.fn().mockReturnValue({}),
+    resolveWorkflowConfigValue: vi.fn().mockReturnValue(undefined),
   };
 });
 
-vi.mock('../features/tasks/execute/pieceExecution.js', () => ({
-  executePiece: vi.fn(),
+vi.mock('../infra/config/resolveConfigValue.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  resolveProviderOptionsWithTrace: vi.fn().mockReturnValue({
+    value: undefined,
+    source: 'global',
+    originResolver: () => 'default',
+  }),
+}));
+
+vi.mock('../features/tasks/execute/workflowExecution.js', () => ({
+  executeWorkflow: vi.fn(),
 }));
 
 vi.mock('../features/tasks/execute/postExecution.js', () => ({
@@ -48,7 +39,7 @@ vi.mock('../infra/task/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../infra/task/index.js')>();
   return {
     ...actual,
-    createSharedClone: vi.fn(),
+    createSharedCloneAbortable: vi.fn(),
     detectDefaultBranch: vi.fn(),
     summarizeTaskName: vi.fn(),
   };
@@ -68,17 +59,17 @@ vi.mock('../shared/ui/index.js', async (importOriginal) => ({
   ),
 }));
 
-// --- Imports (after mocks) ---
+// --- Imports ---
 
-import { executePiece } from '../features/tasks/execute/pieceExecution.js';
+import { executeWorkflow } from '../features/tasks/execute/workflowExecution.js';
 import { postExecutionFlow } from '../features/tasks/execute/postExecution.js';
-import { loadPieceByIdentifier } from '../infra/config/index.js';
-import { detectDefaultBranch } from '../infra/task/index.js';
+import { loadWorkflowByIdentifier } from '../infra/config/index.js';
+import { createSharedCloneAbortable, detectDefaultBranch, summarizeTaskName } from '../infra/task/index.js';
 import { withProgress } from '../shared/ui/index.js';
 import { executeAndCompleteTask } from '../features/tasks/execute/taskExecution.js';
 import { TaskRunner } from '../infra/task/runner.js';
-import type { PieceConfig } from '../core/models/index.js';
-import type { PieceExecutionOptions } from '../features/tasks/execute/types.js';
+import type { WorkflowConfig } from '../core/models/index.js';
+import type { WorkflowExecutionOptions } from '../features/tasks/execute/types.js';
 
 // --- Helpers ---
 
@@ -99,13 +90,13 @@ function writeExceededRecord(testDir: string, overrides: Record<string, unknown>
     name: 'task-a',
     status: 'exceeded',
     content: 'Do work',
-    piece: 'test-piece',
+    workflow: 'test-workflow',
     created_at: '2026-02-09T00:00:00.000Z',
     started_at: '2026-02-09T00:01:00.000Z',
     completed_at: '2026-02-09T00:05:00.000Z',
     owner_pid: null,
-    start_movement: 'implement',
-    exceeded_max_movements: 60,
+    start_step: 'implement',
+    exceeded_max_steps: 60,
     exceeded_current_iteration: 30,
     ...overrides,
   };
@@ -116,12 +107,12 @@ function writeExceededRecord(testDir: string, overrides: Record<string, unknown>
   );
 }
 
-function buildTestPieceConfig(): PieceConfig {
+function buildTestWorkflowConfig(): WorkflowConfig {
   return {
-    name: 'test-piece',
-    maxMovements: 30,
-    initialMovement: 'plan',
-    movements: [
+    name: 'test-workflow',
+    maxSteps: 30,
+    initialStep: 'plan',
+    steps: [
       {
         name: 'plan',
         persona: '../personas/plan.md',
@@ -135,9 +126,7 @@ function buildTestPieceConfig(): PieceConfig {
 }
 
 function applyDefaultMocks(): void {
-  // Re-apply mocks that are not set by the vi.mock factory
-  // (vi.clearAllMocks preserves factory implementations, but these are set per-suite)
-  vi.mocked(loadPieceByIdentifier).mockReturnValue(buildTestPieceConfig());
+  vi.mocked(loadWorkflowByIdentifier).mockReturnValue(buildTestWorkflowConfig());
   vi.mocked(detectDefaultBranch).mockReturnValue('main');
   vi.mocked(postExecutionFlow).mockResolvedValue({ prUrl: undefined, prFailed: false });
   vi.mocked(withProgress).mockImplementation(
@@ -152,7 +141,6 @@ describe('シナリオ1・2: exceeded status transition via executeAndCompleteTa
   let runner: TaskRunner;
 
   beforeEach(() => {
-    // clearAllMocks clears call history but preserves factory implementations
     vi.clearAllMocks();
     applyDefaultMocks();
     testDir = createTestDir();
@@ -165,30 +153,25 @@ describe('シナリオ1・2: exceeded status transition via executeAndCompleteTa
     }
   });
 
-  it('scenario 1: task transitions to exceeded status when executePiece returns exceeded result', async () => {
-    // Given: a pending task
-    runner.addTask('Do work', { piece: 'test-piece' });
+  it('scenario 1: task transitions to exceeded status when executeWorkflow returns exceeded result', async () => {
+    runner.addTask('Do work', { workflow: 'test-workflow' });
     const [task] = runner.claimNextTasks(1);
     if (!task) throw new Error('No task claimed');
 
-    // executePiece simulates hitting iteration limit
-    vi.mocked(executePiece).mockResolvedValueOnce({
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({
       success: false,
       exceeded: true,
       exceededInfo: {
-        currentMovement: 'implement',
-        newMaxMovements: 60,
+        currentStep: 'implement',
+        newMaxSteps: 60,
         currentIteration: 30,
       },
     });
 
-    // When: executeAndCompleteTask processes the exceeded result
     const result = await executeAndCompleteTask(task, runner, testDir);
 
-    // Then: returns false (task did not succeed)
     expect(result).toBe(false);
 
-    // Then: task is now in exceeded status
     const exceededTasks = runner.listExceededTasks();
     expect(exceededTasks).toHaveLength(1);
     expect(exceededTasks[0]?.kind).toBe('exceeded');
@@ -196,46 +179,83 @@ describe('シナリオ1・2: exceeded status transition via executeAndCompleteTa
   });
 
   it('scenario 2: exceeded metadata is recorded in tasks.yaml for resumption', async () => {
-    // Given: a pending task
-    runner.addTask('Do work', { piece: 'test-piece' });
+    const resumePoint = {
+      version: 1 as const,
+      stack: [
+        { workflow: 'test-workflow', step: 'delegate', kind: 'workflow_call' as const },
+        { workflow: 'takt/coding', step: 'review', kind: 'agent' as const },
+      ],
+      iteration: 30,
+      elapsed_ms: 183245,
+    };
+    runner.addTask('Do work', { workflow: 'test-workflow' });
     const [task] = runner.claimNextTasks(1);
     if (!task) throw new Error('No task claimed');
 
-    // executePiece simulates hitting limit at 'implement' movement, producing 30/60 iterations
-    vi.mocked(executePiece).mockResolvedValueOnce({
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({
       success: false,
       exceeded: true,
       exceededInfo: {
-        currentMovement: 'implement',
-        newMaxMovements: 60,
+        currentStep: 'implement',
+        newMaxSteps: 60,
+        currentIteration: 30,
+        resumePoint,
+      },
+    });
+
+    await executeAndCompleteTask(task, runner, testDir);
+
+    const file = loadTasksFile(testDir);
+    const exceededRecord = file.tasks[0];
+    expect(exceededRecord?.status).toBe('exceeded');
+    expect(exceededRecord?.start_step).toBe('implement');
+    expect(exceededRecord?.exceeded_max_steps).toBe(60);
+    expect(exceededRecord?.exceeded_current_iteration).toBe(30);
+    expect(exceededRecord?.resume_point).toEqual(resumePoint);
+  });
+
+  it('scenario 5: first exceed on worktree task persists worktree_path and branch in tasks.yaml', async () => {
+    const cloneDir = join(testDir, '.takt', 'worktrees', `first-exceed-${randomUUID()}`);
+    mkdirSync(cloneDir, { recursive: true });
+    vi.mocked(summarizeTaskName).mockResolvedValueOnce('slug-562');
+    vi.mocked(createSharedCloneAbortable).mockResolvedValueOnce({
+      path: cloneDir,
+      branch: 'takt/slug-562',
+    });
+
+    runner.addTask('Do work', { workflow: 'test-workflow', worktree: true });
+    const [task] = runner.claimNextTasks(1);
+    if (!task) throw new Error('No task claimed');
+
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({
+      success: false,
+      exceeded: true,
+      exceededInfo: {
+        currentStep: 'implement',
+        newMaxSteps: 60,
         currentIteration: 30,
       },
     });
 
-    // When: executeAndCompleteTask records the exceeded result
     await executeAndCompleteTask(task, runner, testDir);
 
-    // Then: YAML contains the three resumption fields
     const file = loadTasksFile(testDir);
-    const exceededRecord = file.tasks[0];
-    expect(exceededRecord?.status).toBe('exceeded');
-    expect(exceededRecord?.start_movement).toBe('implement');
-    expect(exceededRecord?.exceeded_max_movements).toBe(60);
-    expect(exceededRecord?.exceeded_current_iteration).toBe(30);
+    const rec = file.tasks[0];
+    expect(rec?.status).toBe('exceeded');
+    expect(rec?.worktree_path).toBe(cloneDir);
+    expect(rec?.branch).toBe('takt/slug-562');
   });
 });
 
-describe('シナリオ3・4: requeue → re-execution passes exceeded metadata to executePiece', () => {
+describe('シナリオ3・4: requeue → re-execution passes exceeded metadata to executeWorkflow', () => {
   let testDir: string;
   let cloneDir: string;
   let runner: TaskRunner;
 
   beforeEach(() => {
-    // clearAllMocks clears call history but preserves factory implementations
     vi.clearAllMocks();
     applyDefaultMocks();
     testDir = createTestDir();
-    // cloneDir simulates a pre-existing worktree clone inside the managed worktree directory
     cloneDir = join(testDir, '.takt', 'worktrees', `existing-${randomUUID()}`);
     mkdirSync(cloneDir, { recursive: true });
     runner = new TaskRunner(testDir);
@@ -249,61 +269,102 @@ describe('シナリオ3・4: requeue → re-execution passes exceeded metadata t
     }
   });
 
-  it('scenario 3: maxMovementsOverride and initialIterationOverride are passed to executePiece after requeue', async () => {
-    // Given: an exceeded worktree task with pre-existing clone on disk
+  it('scenario 3: maxStepsOverride and initialIterationOverride are passed to executeWorkflow after requeue', async () => {
     writeExceededRecord(testDir, {
       worktree: true,
       worktree_path: cloneDir,
-      exceeded_max_movements: 60,
+      exceeded_max_steps: 60,
       exceeded_current_iteration: 30,
     });
 
-    // Requeue → status back to pending, exceeded metadata and worktree_path preserved
     runner.requeueExceededTask('task-a');
 
-    // Claim the requeued task as running
     const [task] = runner.claimNextTasks(1);
     if (!task) throw new Error('No task claimed');
 
-    // executePiece returns success so we can capture args without side effects
-    vi.mocked(executePiece).mockResolvedValueOnce({ success: true });
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({ success: true });
 
-    // When: executeAndCompleteTask runs the requeued task
     await executeAndCompleteTask(task, runner, testDir);
 
-    // Then: executePiece received the correct exceeded override options
-    expect(vi.mocked(executePiece)).toHaveBeenCalledOnce();
-    const capturedOptions = vi.mocked(executePiece).mock.calls[0]![3] as PieceExecutionOptions;
-    expect(capturedOptions.maxMovementsOverride).toBe(60);
+    expect(vi.mocked(executeWorkflow)).toHaveBeenCalledOnce();
+    const capturedOptions = vi.mocked(executeWorkflow).mock.calls[0]![3] as WorkflowExecutionOptions;
+    expect(capturedOptions.maxStepsOverride).toBe(60);
     expect(capturedOptions.initialIterationOverride).toBe(30);
   });
 
-  it('scenario 4: startMovement is passed so re-execution resumes from the exceeded movement', async () => {
-    // Given: an exceeded worktree task with start_movement='implement'
+  it('scenario 4: startStep is passed so re-execution resumes from the exceeded step', async () => {
     writeExceededRecord(testDir, {
       worktree: true,
       worktree_path: cloneDir,
-      exceeded_max_movements: 60,
+      exceeded_max_steps: 60,
       exceeded_current_iteration: 30,
-      start_movement: 'implement',
+      start_step: 'implement',
     });
 
-    // Requeue → pending, start_movement preserved
     runner.requeueExceededTask('task-a');
 
-    // Claim the requeued task as running
     const [task] = runner.claimNextTasks(1);
     if (!task) throw new Error('No task claimed');
 
-    // executePiece returns success so we can capture args without side effects
-    vi.mocked(executePiece).mockResolvedValueOnce({ success: true });
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({ success: true });
 
-    // When: executeAndCompleteTask runs the requeued task
     await executeAndCompleteTask(task, runner, testDir);
 
-    // Then: executePiece received startMovement='implement' to resume from where it stopped
-    expect(vi.mocked(executePiece)).toHaveBeenCalledOnce();
-    const capturedOptions = vi.mocked(executePiece).mock.calls[0]![3] as PieceExecutionOptions;
-    expect(capturedOptions.startMovement).toBe('implement');
+    expect(vi.mocked(executeWorkflow)).toHaveBeenCalledOnce();
+    const capturedOptions = vi.mocked(executeWorkflow).mock.calls[0]![3] as WorkflowExecutionOptions;
+    expect(capturedOptions.startStep).toBe('implement');
+  });
+
+  it('scenario 6: re-execution trims workflow_call resume_point to the root step when the child no longer resolves', async () => {
+    vi.mocked(loadWorkflowByIdentifier).mockReturnValue({
+      name: 'test-workflow',
+      maxSteps: 30,
+      initialStep: 'delegate',
+      steps: [
+        {
+          name: 'delegate',
+          kind: 'workflow_call',
+          call: 'takt/coding',
+          instruction: '',
+          personaDisplayName: 'delegate',
+          passPreviousResponse: true,
+          rules: [],
+        },
+      ],
+    });
+    writeExceededRecord(testDir, {
+      worktree: true,
+      worktree_path: cloneDir,
+      start_step: 'delegate',
+      resume_point: {
+        version: 1,
+        stack: [
+          { workflow: 'test-workflow', step: 'delegate', kind: 'workflow_call' },
+          { workflow: 'takt/coding', step: 'review', kind: 'agent' },
+        ],
+        iteration: 30,
+        elapsed_ms: 183245,
+      },
+    });
+
+    runner.requeueExceededTask('task-a');
+
+    const [task] = runner.claimNextTasks(1);
+    if (!task) throw new Error('No task claimed');
+
+    vi.mocked(executeWorkflow).mockResolvedValueOnce({ success: true });
+
+    await executeAndCompleteTask(task, runner, testDir);
+
+    const capturedOptions = vi.mocked(executeWorkflow).mock.calls[0]![3] as WorkflowExecutionOptions;
+    expect(capturedOptions.startStep).toBe('delegate');
+    expect(capturedOptions.resumePoint).toEqual({
+      version: 1,
+      stack: [
+        { workflow: 'test-workflow', step: 'delegate', kind: 'workflow_call' },
+      ],
+      iteration: 30,
+      elapsed_ms: 183245,
+    });
   });
 });

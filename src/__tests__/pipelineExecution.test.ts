@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { info, error, success, status } from '../shared/ui/index.js';
 
 const mockFetchIssue = vi.fn();
 const mockCheckGhCli = vi.fn().mockReturnValue({ available: true });
@@ -84,13 +85,17 @@ vi.mock('../features/tasks/execute/slackSummaryAdapter.js', () => ({
 }));
 
 const { executePipeline } = await import('../features/pipeline/index.js');
+const mockInfo = vi.mocked(info);
+const mockError = vi.mocked(error);
+const mockSuccess = vi.mocked(success);
+const mockStatus = vi.mocked(status);
 
 describe('executePipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCreatePullRequestSafely.mockImplementation((provider, cwd, options) => {
+    mockCreatePullRequestSafely.mockImplementation((provider, options, cwd) => {
       try {
-        return provider.createPullRequest(cwd, options);
+        return provider.createPullRequest(options, cwd);
       } catch (error) {
         return {
           success: false,
@@ -108,7 +113,7 @@ describe('executePipeline', () => {
 
   it('should return exit code 2 when neither --issue nor --task is specified', async () => {
     const exitCode = await executePipeline({
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
     });
@@ -121,7 +126,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       issueNumber: 99,
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
     });
@@ -136,7 +141,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       issueNumber: 999,
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
     });
@@ -144,7 +149,7 @@ describe('executePipeline', () => {
     expect(exitCode).toBe(2);
   });
 
-  it('should return exit code 3 when piece fails', async () => {
+  it('should return exit code 3 when workflow fails', async () => {
     mockFetchIssue.mockReturnValueOnce({
       number: 99,
       title: 'Test issue',
@@ -156,12 +161,14 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       issueNumber: 99,
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
     });
 
     expect(exitCode).toBe(3);
+    expect(mockInfo).toHaveBeenCalledWith('Running workflow: default');
+    expect(mockError).toHaveBeenCalledWith("Workflow 'default' failed");
   });
 
   it('should return exit code 0 on successful task-only execution', async () => {
@@ -169,7 +176,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
     });
@@ -178,10 +185,109 @@ describe('executePipeline', () => {
     expect(mockExecuteTask).toHaveBeenCalledWith({
       task: 'Fix the bug',
       cwd: '/tmp/test',
-      pieceIdentifier: 'default',
+      workflowIdentifier: 'default',
       projectCwd: '/tmp/test',
       agentOverrides: undefined,
     });
+    expect(mockInfo).toHaveBeenCalledWith('Running workflow: default');
+    expect(mockSuccess).toHaveBeenCalledWith("Workflow 'default' completed");
+    expect(mockStatus).toHaveBeenCalledWith('Workflow', 'default');
+    expect(mockStatus).toHaveBeenCalledWith('Result', 'Success', 'green');
+  });
+
+  it('should report workflow status for issue execution success', async () => {
+    mockFetchIssue.mockReturnValueOnce({
+      number: 99,
+      title: 'Test issue',
+      body: 'Test body',
+      labels: [],
+      comments: [],
+    });
+    mockExecuteTask.mockResolvedValueOnce(true);
+
+    const exitCode = await executePipeline({
+      issueNumber: 99,
+      workflow: 'default',
+      autoPr: false,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockInfo).toHaveBeenCalledWith('Running workflow: default');
+    expect(mockSuccess).toHaveBeenCalledWith("Workflow 'default' completed");
+    expect(mockStatus).toHaveBeenCalledWith('Workflow', 'default');
+    expect(mockStatus).toHaveBeenCalledWith('Result', 'Success', 'green');
+  });
+
+  it('should sanitize workflow names before terminal output', async () => {
+    mockExecuteTask.mockResolvedValueOnce(true);
+
+    const exitCode = await executePipeline({
+      task: 'Fix the bug',
+      workflow: 'bad\x1b[31m-workflow\n',
+      autoPr: false,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockInfo).toHaveBeenCalledWith('Running workflow: bad-workflow\\n');
+    expect(mockSuccess).toHaveBeenCalledWith("Workflow 'bad-workflow\\n' completed");
+    expect(mockStatus).toHaveBeenCalledWith('Workflow', 'bad-workflow\\n');
+  });
+
+  it('should sanitize issue title and branch in terminal output', async () => {
+    mockFetchIssue.mockReturnValueOnce({
+      number: 99,
+      title: 'Issue\x1b[31m\n',
+      body: 'Test body',
+      labels: [],
+      comments: [],
+    });
+    mockExecuteTask.mockResolvedValueOnce(true);
+
+    const exitCode = await executePipeline({
+      issueNumber: 99,
+      workflow: 'default',
+      branch: 'feature\x1b[2J\t',
+      autoPr: false,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockSuccess).toHaveBeenCalledWith('Issue #99 fetched: "Issue\\n"');
+    expect(mockInfo).toHaveBeenCalledWith('Creating branch: feature\\t');
+    expect(mockSuccess).toHaveBeenCalledWith('Branch created: feature\\t');
+    expect(mockStatus).toHaveBeenCalledWith('Issue', '#99 "Issue\\n"');
+    expect(mockStatus).toHaveBeenCalledWith('Branch', 'feature\\t');
+  });
+
+  it('should sanitize PR titles, branch names, and worktree paths in terminal output', async () => {
+    mockFetchPrReviewComments.mockReturnValueOnce({
+      number: 12,
+      title: 'PR\x1b[31m\n',
+      headRefName: 'feature\x1b[2J',
+      baseRefName: 'main',
+      comments: [],
+    });
+    mockConfirmAndCreateWorktree.mockResolvedValueOnce({
+      execCwd: '/tmp/worktree\tpath',
+      isWorktree: true,
+      branch: 'feature\x1b[2J',
+      baseBranch: 'main',
+    });
+    mockExecuteTask.mockResolvedValueOnce(true);
+
+    const exitCode = await executePipeline({
+      prNumber: 12,
+      workflow: 'default',
+      autoPr: false,
+      createWorktree: true,
+      cwd: '/tmp/test',
+    });
+
+    expect(exitCode).toBe(0);
+    expect(mockSuccess).toHaveBeenCalledWith('PR #12 fetched: "PR\\n"');
+    expect(mockSuccess).toHaveBeenCalledWith('Worktree created: /tmp/worktree\\tpath');
   });
 
   it('passes provider/model overrides to task execution', async () => {
@@ -189,7 +295,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       autoPr: false,
       cwd: '/tmp/test',
       provider: 'codex',
@@ -200,7 +306,7 @@ describe('executePipeline', () => {
     expect(mockExecuteTask).toHaveBeenCalledWith({
       task: 'Fix the bug',
       cwd: '/tmp/test',
-      pieceIdentifier: 'default',
+      workflowIdentifier: 'default',
       projectCwd: '/tmp/test',
       agentOverrides: { provider: 'codex', model: 'codex-model' },
     });
@@ -212,7 +318,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       autoPr: true,
       cwd: '/tmp/test',
     });
@@ -228,7 +334,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       autoPr: true,
       cwd: '/tmp/test',
     });
@@ -242,7 +348,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       branch: 'fix/my-branch',
       autoPr: true,
       repo: 'owner/repo',
@@ -251,11 +357,11 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({
         branch: 'fix/my-branch',
         repo: 'owner/repo',
       }),
+      '/tmp/test',
     );
   });
 
@@ -265,7 +371,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       branch: 'fix/my-branch',
       autoPr: true,
       draftPr: true,
@@ -274,8 +380,8 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({ draft: true }),
+      '/tmp/test',
     );
   });
 
@@ -285,7 +391,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       branch: 'fix/my-branch',
       autoPr: true,
       draftPr: false,
@@ -294,8 +400,8 @@ describe('executePipeline', () => {
 
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledWith(
-      '/tmp/test',
       expect.objectContaining({ draft: false }),
+      '/tmp/test',
     );
   });
 
@@ -313,7 +419,7 @@ describe('executePipeline', () => {
     // When
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       branch: 'fix/my-branch',
       autoPr: true,
       cwd: '/tmp/test',
@@ -322,7 +428,7 @@ describe('executePipeline', () => {
     // Then
     expect(exitCode).toBe(0);
     expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-    const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { branch?: string; base?: string };
+    const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { branch?: string; base?: string };
     expect(prOptions.branch).toBe('fix/my-branch');
     expect(prOptions.base).toBe('develop');
     expect(prOptions.base).not.toBeUndefined();
@@ -333,7 +439,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'From --task flag',
-      piece: 'magi',
+      workflow: 'magi',
       autoPr: false,
       cwd: '/tmp/test',
     });
@@ -342,7 +448,7 @@ describe('executePipeline', () => {
     expect(mockExecuteTask).toHaveBeenCalledWith({
       task: 'From --task flag',
       cwd: '/tmp/test',
-      pieceIdentifier: 'magi',
+      workflowIdentifier: 'magi',
       projectCwd: '/tmp/test',
       agentOverrides: undefined,
     });
@@ -367,7 +473,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         issueNumber: 42,
-        piece: 'default',
+        workflow: 'default',
         branch: 'test-branch',
         autoPr: false,
         cwd: '/tmp/test',
@@ -400,7 +506,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         issueNumber: 10,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -433,7 +539,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         issueNumber: 50,
-        piece: 'default',
+        workflow: 'default',
         branch: 'fix-auth',
         autoPr: true,
         cwd: '/tmp/test',
@@ -442,10 +548,36 @@ describe('executePipeline', () => {
       // When prBodyTemplate is set, buildPrBody (mock) should NOT be called
       // Instead, the template is expanded directly
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           body: '## Summary\nAuth is broken.\n\nCloses #50',
         }),
+        '/tmp/test',
+      );
+    });
+
+    it('should use pr_body_template for task-based PR creation when issue is unavailable', async () => {
+      mockResolveConfigValues.mockReturnValue({
+        pipeline: {
+          prBodyTemplate: '## Summary\n{report}\n\nIssue:{issue}\nDetails:{issue_body}',
+        },
+      });
+      mockExecuteTask.mockResolvedValueOnce(true);
+      mockCreatePullRequest.mockReturnValueOnce({ success: true, url: 'https://github.com/pr/2' });
+
+      await executePipeline({
+        task: 'Fix task-only PR body',
+        workflow: 'default',
+        branch: 'fix-task-pr-body',
+        autoPr: true,
+        cwd: '/tmp/test',
+      });
+
+      expect(mockBuildPrBody).not.toHaveBeenCalled();
+      expect(mockCreatePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: '## Summary\nWorkflow `default` completed successfully.\n\nIssue:\nDetails:',
+        }),
+        '/tmp/test',
       );
     });
 
@@ -455,7 +587,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         task: 'Fix bug',
-        piece: 'default',
+        workflow: 'default',
         branch: 'fix-branch',
         autoPr: true,
         cwd: '/tmp/test',
@@ -463,11 +595,12 @@ describe('executePipeline', () => {
 
       // Should use buildPrBody (the mock)
       expect(mockBuildPrBody).toHaveBeenCalled();
+      expect(mockBuildPrBody).toHaveBeenCalledWith(undefined, 'Workflow `default` completed successfully.');
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           body: 'Default PR body',
         }),
+        '/tmp/test',
       );
     });
   });
@@ -478,7 +611,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         skipGit: true,
         cwd: '/tmp/test',
@@ -488,7 +621,7 @@ describe('executePipeline', () => {
       expect(mockExecuteTask).toHaveBeenCalledWith({
         task: 'Fix the bug',
         cwd: '/tmp/test',
-        pieceIdentifier: 'default',
+        workflowIdentifier: 'default',
         projectCwd: '/tmp/test',
         agentOverrides: undefined,
       });
@@ -506,7 +639,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: true,
         skipGit: true,
         cwd: '/tmp/test',
@@ -516,12 +649,12 @@ describe('executePipeline', () => {
       expect(mockCreatePullRequest).not.toHaveBeenCalled();
     });
 
-    it('should still return piece failure exit code when skipGit is true', async () => {
+    it('should still return workflow failure exit code when skipGit is true', async () => {
       mockExecuteTask.mockResolvedValueOnce(false);
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         skipGit: true,
         cwd: '/tmp/test',
@@ -544,7 +677,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -561,7 +694,7 @@ describe('executePipeline', () => {
       expect(mockExecuteTask).toHaveBeenCalledWith({
         task: 'Fix the bug',
         cwd: '/tmp/test-worktree',
-        pieceIdentifier: 'default',
+        workflowIdentifier: 'default',
         projectCwd: '/tmp/test',
         agentOverrides: undefined,
       });
@@ -572,7 +705,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: false,
@@ -583,7 +716,7 @@ describe('executePipeline', () => {
       expect(mockExecuteTask).toHaveBeenCalledWith({
         task: 'Fix the bug',
         cwd: '/tmp/test',
-        pieceIdentifier: 'default',
+        workflowIdentifier: 'default',
         projectCwd: '/tmp/test',
         agentOverrides: undefined,
       });
@@ -594,7 +727,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -604,7 +737,7 @@ describe('executePipeline', () => {
       expect(mockExecuteTask).toHaveBeenCalledWith({
         task: 'Fix the bug',
         cwd: '/tmp/test',
-        pieceIdentifier: 'default',
+        workflowIdentifier: 'default',
         projectCwd: '/tmp/test',
         agentOverrides: undefined,
       });
@@ -622,7 +755,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -634,7 +767,7 @@ describe('executePipeline', () => {
       expect(mockExecuteTask).toHaveBeenCalledWith({
         task: 'Fix the bug',
         cwd: '/tmp/test-worktree',
-        pieceIdentifier: 'default',
+        workflowIdentifier: 'default',
         projectCwd: '/tmp/test',
         agentOverrides: { provider: 'codex', model: 'codex-model' },
       });
@@ -645,7 +778,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -665,7 +798,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -688,7 +821,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -730,7 +863,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: true,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -738,11 +871,11 @@ describe('executePipeline', () => {
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           branch: 'fix/the-bug',
           base: 'main',
         }),
+        '/tmp/test',
       );
     });
 
@@ -759,7 +892,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         autoPr: true,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -767,11 +900,11 @@ describe('executePipeline', () => {
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledWith(
-        '/tmp/test',
         expect.objectContaining({
           branch: 'fix/the-bug',
           base: 'release/main',
         }),
+        '/tmp/test',
       );
     });
 
@@ -798,7 +931,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
         createWorktree: true,
@@ -828,7 +961,7 @@ describe('executePipeline', () => {
 
     const exitCode = await executePipeline({
       task: 'Fix the bug',
-      piece: 'default',
+      workflow: 'default',
       branch: 'fix/my-branch',
       autoPr: false,
       cwd: '/tmp/test',
@@ -844,7 +977,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+      workflow: 'default',
         autoPr: false,
         skipGit: true,
         cwd: '/tmp/test',
@@ -859,7 +992,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+      workflow: 'default',
         autoPr: false,
         skipGit: true,
         cwd: '/tmp/test',
@@ -875,7 +1008,7 @@ describe('executePipeline', () => {
           tasks: [expect.objectContaining({
             name: 'pipeline',
             success: true,
-            piece: 'default',
+            workflow: 'default',
           })],
         }),
       );
@@ -885,13 +1018,13 @@ describe('executePipeline', () => {
       );
     });
 
-    it('should send failure notification when piece fails', async () => {
+    it('should send failure notification when workflow fails', async () => {
       mockGetSlackWebhookUrl.mockReturnValue('https://hooks.slack.com/test');
       mockExecuteTask.mockResolvedValueOnce(false);
 
       await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+      workflow: 'default',
         autoPr: false,
         skipGit: true,
         cwd: '/tmp/test',
@@ -916,7 +1049,7 @@ describe('executePipeline', () => {
 
       await executePipeline({
         task: 'Fix the bug',
-        piece: 'default',
+        workflow: 'default',
         branch: 'fix/test',
         autoPr: true,
         cwd: '/tmp/test',
@@ -948,13 +1081,13 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
 
       expect(exitCode).toBe(0);
-      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+      expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, '/tmp/test');
       expect(mockFormatPrReviewAsTask).toHaveBeenCalled();
       // PR branch checkout
       const checkoutCall = mockExecFileSync.mock.calls.find(
@@ -968,7 +1101,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -991,7 +1124,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -1007,7 +1140,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 999,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -1030,7 +1163,7 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: false,
         cwd: '/tmp/test',
       });
@@ -1073,7 +1206,7 @@ describe('executePipeline', () => {
       // When
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: true,
         cwd: '/tmp/test',
       });
@@ -1081,7 +1214,7 @@ describe('executePipeline', () => {
       // Then
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-      const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { base?: string };
+      const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { base?: string };
       expect(prOptions.base).toBe('release/main');
       expect(prOptions.base).not.toBeUndefined();
       expect(prOptions.base).not.toBe('develop');
@@ -1110,14 +1243,14 @@ describe('executePipeline', () => {
 
       const exitCode = await executePipeline({
         prNumber: 456,
-        piece: 'default',
+        workflow: 'default',
         autoPr: true,
         cwd: '/tmp/test',
       });
 
       expect(exitCode).toBe(0);
       expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
-      const prOptions = mockCreatePullRequest.mock.calls[0]?.[1] as { base?: string };
+      const prOptions = mockCreatePullRequest.mock.calls[0]?.[0] as { base?: string };
       expect(prOptions.base).toBe('develop');
       expect(prOptions.base).not.toBeUndefined();
     });

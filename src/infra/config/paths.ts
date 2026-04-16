@@ -6,7 +6,7 @@
  */
 
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import type { Language } from '../../core/models/index.js';
 import { getLanguageResourcesDir } from '../resources/index.js';
 
@@ -16,6 +16,7 @@ import {
   getProjectConfigPath as resolveProjectConfigPath,
 } from './project/projectConfigPaths.js';
 import {
+  getGlobalConfigDir,
   getRepertoireDir,
 } from './global/globalConfigPaths.js';
 
@@ -27,16 +28,25 @@ export {
   getGlobalFacetDir,
   getGlobalLogsDir,
   getGlobalPersonasDir,
-  getGlobalPiecesDir,
   getRepertoireDir,
   getRepertoirePackageDir,
 } from './global/globalConfigPaths.js';
 
 type FacetType = FacetKind;
 
-/** Get builtin pieces directory (builtins/{lang}/pieces) */
-export function getBuiltinPiecesDir(lang: Language): string {
-  return join(getLanguageResourcesDir(lang), 'pieces');
+/** Get takt global workflows directory (~/.takt/workflows) */
+export function getGlobalWorkflowsDir(): string {
+  return join(getGlobalConfigDir(), 'workflows');
+}
+
+/** Get takt global schemas directory (~/.takt/schemas) */
+export function getGlobalSchemasDir(): string {
+  return join(getGlobalConfigDir(), 'schemas');
+}
+
+/** Get builtin workflows directory (builtins/{lang}/workflows) */
+export function getBuiltinWorkflowsDir(lang: Language): string {
+  return join(getLanguageResourcesDir(lang), 'workflows');
 }
 
 /** Get builtin personas directory (builtins/{lang}/facets/personas) */
@@ -49,9 +59,14 @@ export function getProjectConfigDir(projectDir: string): string {
   return resolveProjectConfigDir(projectDir);
 }
 
-/** Get project pieces directory (.takt/pieces in project) */
-export function getProjectPiecesDir(projectDir: string): string {
-  return join(getProjectConfigDir(projectDir), 'pieces');
+/** Get project workflows directory (.takt/workflows in project) */
+export function getProjectWorkflowsDir(projectDir: string): string {
+  return join(getProjectConfigDir(projectDir), 'workflows');
+}
+
+/** Get project schemas directory (.takt/schemas in project) */
+export function getProjectSchemasDir(projectDir: string): string {
+  return join(getProjectConfigDir(projectDir), 'schemas');
 }
 
 /** Get project config file path */
@@ -105,8 +120,8 @@ export function getRepertoireFacetDir(owner: string, repo: string, facetType: Fa
 
 /** Validate path is safe (no directory traversal) */
 export function isPathSafe(basePath: string, targetPath: string): boolean {
-  const resolvedBase = resolve(basePath);
-  const resolvedTarget = resolve(targetPath);
+  const resolvedBase = existsSync(basePath) ? realpathSync(basePath) : resolve(basePath);
+  const resolvedTarget = existsSync(targetPath) ? realpathSync(targetPath) : resolve(targetPath);
   const rel = relative(resolvedBase, resolvedTarget);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }

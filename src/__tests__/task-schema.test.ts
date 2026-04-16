@@ -3,7 +3,14 @@ import {
   TaskRecordSchema,
   TaskFileSchema,
   TaskExecutionConfigSchema,
+  serializeTaskRecord,
+  resolveTaskWorkflowValue,
+  resolveTaskStartStepValue,
 } from '../infra/task/schema.js';
+import {
+  unexpectedStartStepKey,
+  unexpectedWorkflowKey,
+} from '../../test/helpers/unknown-contract-test-keys.js';
 
 function makePendingRecord() {
   return {
@@ -67,9 +74,9 @@ describe('TaskExecutionConfigSchema', () => {
     const config = {
       worktree: true,
       branch: 'feature/test',
-      piece: 'unit-test',
+      workflow: 'unit-test',
       issue: 42,
-      start_movement: 'plan',
+      start_step: 'plan',
       retry_note: 'retry after fix',
       auto_pr: true,
     };
@@ -94,6 +101,46 @@ describe('TaskExecutionConfigSchema', () => {
 
   it('should accept base_branch when provided in config', () => {
     expect(() => TaskExecutionConfigSchema.parse({ base_branch: 'feature/base' })).not.toThrow();
+  });
+
+  it('should accept workflow and start_step keys', () => {
+    const config = TaskExecutionConfigSchema.parse({
+      workflow: 'unit-test',
+      start_step: 'plan',
+    }) as Record<string, unknown>;
+
+    expect(config.workflow).toBe('unit-test');
+    expect(config.start_step).toBe('plan');
+  });
+
+  it('should reject unknown workflow keys', () => {
+    expect(() => TaskExecutionConfigSchema.parse({
+      [unexpectedWorkflowKey]: 'legacy-workflow',
+    })).toThrow();
+
+    expect(() => TaskExecutionConfigSchema.parse({
+      [unexpectedStartStepKey]: 'plan',
+    })).toThrow();
+  });
+
+  it('should resolve workflow and start step through shared helpers', () => {
+    expect(resolveTaskWorkflowValue({ workflow: 'unit-test' })).toBe('unit-test');
+    expect(resolveTaskStartStepValue({ start_step: 'plan' })).toBe('plan');
+    expect(resolveTaskWorkflowValue({ [unexpectedWorkflowKey]: 'unit-test' })).toBeUndefined();
+    expect(resolveTaskStartStepValue({ [unexpectedStartStepKey]: 'plan' })).toBeUndefined();
+  });
+
+  it('should serialize canonical task keys as workflow and start_step', () => {
+    const serialized = serializeTaskRecord({
+      ...makePendingRecord(),
+      workflow: 'unit-test',
+      start_step: 'plan',
+    } as ReturnType<typeof makePendingRecord> & { workflow: string; start_step: string });
+
+    expect(serialized).toMatchObject({
+      workflow: 'unit-test',
+      start_step: 'plan',
+    });
   });
 });
 
@@ -141,6 +188,11 @@ describe('TaskRecordSchema', () => {
   describe('running status', () => {
     it('should accept valid running record', () => {
       expect(() => TaskRecordSchema.parse(makeRunningRecord())).not.toThrow();
+    });
+
+    it('should accept running record with run_slug', () => {
+      const record = { ...makeRunningRecord(), run_slug: '20260409-running-task' };
+      expect(() => TaskRecordSchema.parse(record)).not.toThrow();
     });
 
     it('should reject running record without started_at', () => {
@@ -213,6 +265,17 @@ describe('TaskRecordSchema', () => {
     it('should reject pr_failed record with owner_pid', () => {
       const record = { ...makePrFailedRecord(), owner_pid: 1234 };
       expect(() => TaskRecordSchema.parse(record)).toThrow();
+    });
+  });
+
+  it('should serialize run_slug when present', () => {
+    const serialized = serializeTaskRecord({
+      ...makeRunningRecord(),
+      run_slug: '20260409-running-task',
+    });
+
+    expect(serialized).toMatchObject({
+      run_slug: '20260409-running-task',
     });
   });
 

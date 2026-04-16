@@ -1,5 +1,5 @@
-import { readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { writeFileSync } from 'node:fs';
+import { stringify as stringifyYaml } from 'yaml';
 import { GlobalConfigSchema } from '../../../core/models/index.js';
 import type { GlobalConfig } from '../../../core/models/config-types.js';
 import {
@@ -8,20 +8,23 @@ import {
 } from '../providerReference.js';
 import {
   normalizeProviderProfiles,
-  normalizePieceOverrides,
+  normalizeWorkflowOverrides,
   normalizePipelineConfig,
   normalizePersonaProviders,
   normalizeTaktProviders,
   buildRawTaktProvidersOrThrow,
   normalizeRuntime,
 } from '../configNormalizers.js';
+import {
+  resolveAliasedPreviewCount,
+} from '../configKeyAliases.js';
 import { getGlobalConfigPath } from '../paths.js';
-import { applyGlobalConfigEnvOverrides } from '../env/config-env-overrides.js';
 import { invalidateAllResolvedConfigCache } from '../resolutionCache.js';
 import { validateProviderModelCompatibility } from '../providerModelCompatibility.js';
 import { expandOptionalHomePath } from '../pathExpansion.js';
 import { sanitizeConfigValue } from './globalConfigLegacyMigration.js';
 import { serializeGlobalConfig } from './globalConfigSerializer.js';
+import { loadGlobalConfigTrace, type ConfigTrace } from '../traced/tracedConfigLoader.js';
 export { validateCliPath } from './cliPathValidator.js';
 
 function getRecord(value: unknown): Record<string, unknown> | undefined {
@@ -31,11 +34,43 @@ function getRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function assertNoUnknownGlobalConfigKeys(rawConfig: Record<string, unknown>): void {
+  const parsedResult = GlobalConfigSchema.safeParse(rawConfig);
+  if (parsedResult.success) {
+    return;
+  }
+  const issue = parsedResult.error.issues.find((candidate) => candidate.code === 'unrecognized_keys');
+  if (!issue) {
+    return;
+  }
+  throw new Error(issue.message);
+}
+
+function assertValidGlobalConfig(
+  rawConfig: Record<string, unknown>,
+  configPath: string,
+  onlyUnrecognizedKeys = false,
+): void {
+  const parsedResult = GlobalConfigSchema.safeParse(rawConfig);
+  if (!parsedResult.success) {
+    const firstIssue = onlyUnrecognizedKeys
+      ? parsedResult.error.issues.find((issue) => issue.code === 'unrecognized_keys')
+      : parsedResult.error.issues[0];
+    if (!firstIssue) {
+      return;
+    }
+    throw new Error(
+      `Configuration error: invalid ${firstIssue.path.join('.')} in ${configPath}: ${firstIssue.message ?? 'Invalid configuration value'}`,
+    );
+  }
+}
+
 type ProviderType = NonNullable<GlobalConfig['provider']>;
 type RawProviderReference = ConfigProviderReference<ProviderType>;
 export class GlobalConfigManager {
   private static instance: GlobalConfigManager | null = null;
   private cachedConfig: GlobalConfig | null = null;
+  private cachedTrace: ConfigTrace | null = null;
   private constructor() {}
 
   static getInstance(): GlobalConfigManager {
@@ -51,6 +86,7 @@ export class GlobalConfigManager {
 
   invalidateCache(): void {
     this.cachedConfig = null;
+    this.cachedTrace = null;
   }
 
   load(): GlobalConfig {
@@ -59,25 +95,21 @@ export class GlobalConfigManager {
     }
     const configPath = getGlobalConfigPath();
 
-    const rawConfig: Record<string, unknown> = {};
-    if (existsSync(configPath)) {
-      const content = readFileSync(configPath, 'utf-8');
-      const parsedRaw = parseYaml(content);
-      if (parsedRaw && typeof parsedRaw === 'object' && !Array.isArray(parsedRaw)) {
-        const sanitizedParsedRaw = getRecord(sanitizeConfigValue(parsedRaw, 'config'));
-        if (!sanitizedParsedRaw) {
+    const { parsedConfig, rawConfig, trace } = loadGlobalConfigTrace(
+      configPath,
+      (value: unknown) => {
+        if (value == null) {
+          return value;
+        }
+        const sanitized = getRecord(sanitizeConfigValue(value, 'config'));
+        if (!sanitized) {
           throw new Error('Configuration error: ~/.takt/config.yaml must be a YAML object.');
         }
-        for (const [key, value] of Object.entries(sanitizedParsedRaw)) {
-          rawConfig[key] = value;
-        }
-      } else if (parsedRaw != null) {
-        throw new Error('Configuration error: ~/.takt/config.yaml must be a YAML object.');
-      }
-    }
-
-    applyGlobalConfigEnvOverrides(rawConfig);
-
+        return sanitized;
+      },
+    );
+    assertValidGlobalConfig(parsedConfig, configPath, true);
+    assertNoUnknownGlobalConfigKeys(rawConfig);
     const parsed = GlobalConfigSchema.parse(rawConfig);
     const normalizedProvider = normalizeConfigProviderReference(
       parsed.provider as RawProviderReference,
@@ -107,7 +139,7 @@ export class GlobalConfigManager {
       autoPr: parsed.auto_pr,
       draftPr: parsed.draft_pr,
       disabledBuiltins: parsed.disabled_builtins,
-      enableBuiltinPieces: parsed.enable_builtin_pieces,
+      enableBuiltinWorkflows: parsed.enable_builtin_workflows,
       anthropicApiKey: parsed.anthropic_api_key,
       openaiApiKey: parsed.openai_api_key,
       geminiApiKey: parsed.gemini_api_key,
@@ -122,45 +154,48 @@ export class GlobalConfigManager {
       opencodeApiKey: parsed.opencode_api_key,
       cursorApiKey: parsed.cursor_api_key,
       bookmarksFile: expandOptionalHomePath(parsed.bookmarks_file),
-      pieceCategoriesFile: expandOptionalHomePath(parsed.piece_categories_file),
+      workflowCategoriesFile: expandOptionalHomePath(parsed.workflow_categories_file),
       providerOptions: normalizedProvider.providerOptions,
-      providerProfiles: normalizeProviderProfiles(parsed.provider_profiles as Record<string, { default_permission_mode: unknown; movement_permission_overrides?: Record<string, unknown> }> | undefined),
+      providerProfiles: normalizeProviderProfiles(
+        parsed.provider_profiles as Record<string, {
+          default_permission_mode: string;
+          step_permission_overrides?: Record<string, string>;
+        }> | undefined,
+      ),
       runtime: normalizeRuntime(parsed.runtime),
-      pieceRuntimePrepare: parsed.piece_runtime_prepare ? {
-        customScripts: parsed.piece_runtime_prepare.custom_scripts,
+      workflowRuntimePrepare: parsed.workflow_runtime_prepare ? {
+        customScripts: parsed.workflow_runtime_prepare.custom_scripts,
       } : undefined,
-      pieceArpeggio: parsed.piece_arpeggio ? {
-        customDataSourceModules: parsed.piece_arpeggio.custom_data_source_modules,
-        customMergeInlineJs: parsed.piece_arpeggio.custom_merge_inline_js,
-        customMergeFiles: parsed.piece_arpeggio.custom_merge_files,
+      workflowArpeggio: parsed.workflow_arpeggio ? {
+        customDataSourceModules: parsed.workflow_arpeggio.custom_data_source_modules,
+        customMergeInlineJs: parsed.workflow_arpeggio.custom_merge_inline_js,
+        customMergeFiles: parsed.workflow_arpeggio.custom_merge_files,
       } : undefined,
       syncConflictResolver: parsed.sync_conflict_resolver ? {
         autoApproveTools: parsed.sync_conflict_resolver.auto_approve_tools,
       } : undefined,
-      pieceMcpServers: parsed.piece_mcp_servers ? {
-        stdio: parsed.piece_mcp_servers.stdio,
-        sse: parsed.piece_mcp_servers.sse,
-        http: parsed.piece_mcp_servers.http,
+      workflowMcpServers: parsed.workflow_mcp_servers ? {
+        stdio: parsed.workflow_mcp_servers.stdio,
+        sse: parsed.workflow_mcp_servers.sse,
+        http: parsed.workflow_mcp_servers.http,
       } : undefined,
       preventSleep: parsed.prevent_sleep,
       notificationSound: parsed.notification_sound,
       notificationSoundEvents: parsed.notification_sound_events ? {
-        iterationLimit: parsed.notification_sound_events.iteration_limit,
-        pieceComplete: parsed.notification_sound_events.piece_complete,
-        pieceAbort: parsed.notification_sound_events.piece_abort,
-        runComplete: parsed.notification_sound_events.run_complete,
-        runAbort: parsed.notification_sound_events.run_abort,
+        iterationLimit: parsed.notification_sound_events.iteration_limit as boolean | undefined,
+        workflowComplete: parsed.notification_sound_events.workflow_complete as boolean | undefined,
+        workflowAbort: parsed.notification_sound_events.workflow_abort as boolean | undefined,
+        runComplete: parsed.notification_sound_events.run_complete as boolean | undefined,
+        runAbort: parsed.notification_sound_events.run_abort as boolean | undefined,
       } : undefined,
       autoFetch: parsed.auto_fetch,
       baseBranch: parsed.base_branch,
-      pieceOverrides: normalizePieceOverrides(
-        parsed.piece_overrides as {
-          quality_gates?: string[];
-          quality_gates_edit_only?: boolean;
-          movements?: Record<string, { quality_gates?: string[] }>;
-          personas?: Record<string, { quality_gates?: string[] }>;
-        } | undefined
-      ),
+      workflowOverrides: normalizeWorkflowOverrides(parsed.workflow_overrides as {
+        quality_gates?: string[];
+        quality_gates_edit_only?: boolean;
+        steps?: Record<string, { quality_gates?: string[] }>;
+        personas?: Record<string, { quality_gates?: string[] }>;
+      } | undefined),
       // Project-local keys (also accepted in global config)
       pipeline: normalizePipelineConfig(
         parsed.pipeline as { default_branch_prefix?: string; commit_message_template?: string; pr_body_template?: string } | undefined,
@@ -180,11 +215,23 @@ export class GlobalConfigManager {
       minimalOutput: parsed.minimal_output as boolean | undefined,
       concurrency: parsed.concurrency as number | undefined,
       taskPollIntervalMs: parsed.task_poll_interval_ms as number | undefined,
-      interactivePreviewMovements: parsed.interactive_preview_movements as number | undefined,
+      interactivePreviewSteps: resolveAliasedPreviewCount(parsed as Record<string, unknown>),
     };
     validateProviderModelCompatibility(config.provider, config.model);
     this.cachedConfig = config;
+    this.cachedTrace = trace;
     return config;
+  }
+
+  getTrace(): ConfigTrace {
+    if (this.cachedTrace !== null) {
+      return this.cachedTrace;
+    }
+    this.load();
+    if (this.cachedTrace === null) {
+      throw new Error('Global config trace is not available');
+    }
+    return this.cachedTrace;
   }
 
   save(config: GlobalConfig): void {
@@ -212,4 +259,8 @@ export function loadGlobalConfig(): GlobalConfig {
 
 export function saveGlobalConfig(config: GlobalConfig): void {
   GlobalConfigManager.getInstance().save(config);
+}
+
+export function loadGlobalConfigTraceState(): ConfigTrace {
+  return GlobalConfigManager.getInstance().getTrace();
 }

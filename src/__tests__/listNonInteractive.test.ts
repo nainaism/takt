@@ -35,6 +35,8 @@ function writeTasksFile(projectDir: string): void {
         name: 'pending-task',
         status: 'pending',
         content: 'Pending content',
+        workflow: 'workflow-alpha',
+        start_step: 'implement',
         created_at: '2026-02-09T00:00:00.000Z',
         started_at: null,
         completed_at: null,
@@ -46,7 +48,7 @@ function writeTasksFile(projectDir: string): void {
         created_at: '2026-02-09T00:00:00.000Z',
         started_at: '2026-02-09T00:01:00.000Z',
         completed_at: '2026-02-09T00:02:00.000Z',
-        failure: { error: 'Boom' },
+        failure: { step: 'review', error: 'Boom' },
       },
     ],
   }), 'utf-8');
@@ -69,11 +71,33 @@ describe('listTasksNonInteractive', () => {
     await listTasksNonInteractive(tmpDir, { enabled: true, format: 'json' });
 
     expect(logSpy).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(logSpy.mock.calls[0]![0] as string) as { tasks: Array<{ name: string; kind: string }> };
+    const payload = JSON.parse(logSpy.mock.calls[0]![0] as string) as {
+      tasks: Array<{
+        name: string;
+        kind: string;
+        data?: { workflow?: string; start_step?: string };
+        failure?: { step?: string; error: string };
+      }>;
+    };
     expect(payload.tasks[0]?.name).toBe('pending-task');
     expect(payload.tasks[0]?.kind).toBe('pending');
+    expect(payload.tasks[0]?.data?.workflow).toBe('workflow-alpha');
+    expect(payload.tasks[0]?.data?.start_step).toBe('implement');
     expect(payload.tasks[1]?.name).toBe('failed-task');
     expect(payload.tasks[1]?.kind).toBe('failed');
+    expect(payload.tasks[1]?.failure?.step).toBe('review');
+
+    logSpy.mockRestore();
+  });
+
+  it('should output an empty JSON payload when format=json and there are no tasks', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await listTasksNonInteractive(tmpDir, { enabled: true, format: 'json' });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toEqual({ tasks: [] });
+    expect(mockInfo).not.toHaveBeenCalledWith('No tasks to list.');
 
     logSpy.mockRestore();
   });

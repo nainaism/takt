@@ -34,7 +34,7 @@ vi.mock('../shared/utils/index.js', async (importOriginal) => ({
 }));
 
 vi.mock('../features/tasks/execute/selectAndExecute.js', () => ({
-  determinePiece: vi.fn(),
+  determineWorkflow: vi.fn(),
 }));
 
 vi.mock('../infra/task/index.js', async (importOriginal) => ({
@@ -45,6 +45,13 @@ vi.mock('../infra/task/index.js', async (importOriginal) => ({
 
 vi.mock('../infra/task/clone-base-branch.js', () => ({
   branchExists: vi.fn(),
+  localBranchExists: vi.fn(),
+  remoteBranchExists: vi.fn(),
+  localBranchExistsAbortable: vi.fn(),
+  remoteBranchExistsAbortable: vi.fn(),
+  branchExistsAbortable: vi.fn(),
+  resolveBaseBranch: vi.fn().mockReturnValue({ branch: 'main' }),
+  resolveBaseBranchAbortable: vi.fn().mockResolvedValue({ branch: 'main' }),
 }));
 
 const mockIsIssueReference = vi.fn((s: string) => /^#\d+$/.test(s));
@@ -76,7 +83,7 @@ vi.mock('../infra/git/index.js', () => ({
 import { interactiveMode } from '../features/interactive/index.js';
 import { promptInput, confirm } from '../shared/prompt/index.js';
 import { error, info } from '../shared/ui/index.js';
-import { determinePiece } from '../features/tasks/execute/selectAndExecute.js';
+import { determineWorkflow } from '../features/tasks/execute/selectAndExecute.js';
 import { addTask } from '../features/tasks/index.js';
 import { getCurrentBranch } from '../infra/task/index.js';
 import { branchExists } from '../infra/task/clone-base-branch.js';
@@ -87,7 +94,7 @@ const mockPromptInput = vi.mocked(promptInput);
 const mockConfirm = vi.mocked(confirm);
 const mockInfo = vi.mocked(info);
 const mockError = vi.mocked(error);
-const mockDeterminePiece = vi.mocked(determinePiece);
+const mockDetermineWorkflow = vi.mocked(determineWorkflow);
 const mockGetCurrentBranch = vi.mocked(getCurrentBranch);
 const mockBranchExists = vi.mocked(branchExists);
 
@@ -119,7 +126,7 @@ function createMockPrReview(overrides: Partial<PrReviewData & { baseRefName?: st
 beforeEach(() => {
   vi.clearAllMocks();
   testDir = fs.mkdtempSync(path.join(tmpdir(), 'takt-test-'));
-  mockDeterminePiece.mockResolvedValue('default');
+  mockDetermineWorkflow.mockResolvedValue('default');
   mockConfirm.mockResolvedValue(false);
   mockGetCurrentBranch.mockReturnValue('main');
   mockBranchExists.mockReturnValue(true);
@@ -141,7 +148,7 @@ describe('addTask', () => {
     await addTask(testDir);
 
     expect(mockInfo).toHaveBeenCalledWith('Usage: takt add <task>');
-    expect(mockDeterminePiece).not.toHaveBeenCalled();
+    expect(mockDetermineWorkflow).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
 
@@ -149,7 +156,7 @@ describe('addTask', () => {
     await addTask(testDir, '   ');
 
     expect(mockInfo).toHaveBeenCalledWith('Usage: takt add <task>');
-    expect(mockDeterminePiece).not.toHaveBeenCalled();
+    expect(mockDetermineWorkflow).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
 
@@ -161,7 +168,7 @@ describe('addTask', () => {
     expect(task.content).toBeUndefined();
     expect(task.task_dir).toBeTypeOf('string');
     expect(readOrderContent(testDir, task.task_dir)).toContain('JWT認証を実装する');
-    expect(task.piece).toBe('default');
+    expect(task.workflow).toBe('default');
     expect(task.worktree).toBe(true);
   });
 
@@ -240,7 +247,7 @@ describe('addTask', () => {
     expect(mockInteractiveMode).not.toHaveBeenCalled();
     expect(mockIsIssueReference).toHaveBeenCalledWith('#99');
     expect(mockParseIssueNumbers).toHaveBeenCalledWith(['#99']);
-    expect(mockResolveIssueTask).toHaveBeenCalledWith('#99');
+    expect(mockResolveIssueTask).toHaveBeenCalledWith('#99', testDir);
     expect(mockCheckCliStatus).not.toHaveBeenCalled();
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.content).toBeUndefined();
@@ -256,24 +263,27 @@ describe('addTask', () => {
 
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
-    expect(mockCheckCliStatus).toHaveBeenCalled();
+    expect(mockCheckCliStatus).toHaveBeenCalledWith(testDir);
     expect(mockCheckCliStatus.mock.invocationCallOrder[0]).toBeLessThan(
       mockFetchPrReviewComments.mock.invocationCallOrder[0],
     );
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
     expect(mockIsIssueReference).not.toHaveBeenCalled();
     expect(mockParseIssueNumbers).not.toHaveBeenCalled();
     expect(mockResolveIssueTask).not.toHaveBeenCalled();
     expect(mockPromptInput).not.toHaveBeenCalled();
     expect(mockConfirm).not.toHaveBeenCalled();
-    expect(mockDeterminePiece).toHaveBeenCalledTimes(1);
+    expect(mockDetermineWorkflow).toHaveBeenCalledTimes(1);
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.content).toBeUndefined();
     expect(task.branch).toBe('feature/fix-auth-bug');
     expect(task.auto_pr).toBe(false);
     expect(task.worktree).toBe(true);
+    expect(task.should_publish_branch_to_origin).toBe(true);
     expect(task.draft_pr).toBeUndefined();
+    expect(task.source).toBe('pr_review');
+    expect(task.pr_number).toBe(456);
     expect(readOrderContent(testDir, task.task_dir)).toContain(formattedTask);
   });
 
@@ -287,6 +297,7 @@ describe('addTask', () => {
 
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.base_branch).toBe('release/main');
+    expect(task.should_publish_branch_to_origin).toBe(true);
   });
 
   it('should not create a PR task when PR has no review comments', async () => {
@@ -296,9 +307,9 @@ describe('addTask', () => {
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).not.toHaveBeenCalled();
-    expect(mockDeterminePiece).not.toHaveBeenCalled();
+    expect(mockDetermineWorkflow).not.toHaveBeenCalled();
     expect(mockError).toHaveBeenCalled();
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
@@ -309,9 +320,9 @@ describe('addTask', () => {
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).not.toHaveBeenCalled();
-    expect(mockDeterminePiece).not.toHaveBeenCalled();
+    expect(mockDetermineWorkflow).not.toHaveBeenCalled();
     expect(mockError).toHaveBeenCalledWith(expect.stringContaining('network timeout'));
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
@@ -323,7 +334,7 @@ describe('addTask', () => {
 
     expect(mockFetchPrReviewComments).not.toHaveBeenCalled();
     expect(mockFormatPrReviewAsTask).not.toHaveBeenCalled();
-    expect(mockDeterminePiece).not.toHaveBeenCalled();
+    expect(mockDetermineWorkflow).not.toHaveBeenCalled();
     expect(mockError).toHaveBeenCalled();
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
@@ -341,7 +352,7 @@ describe('addTask', () => {
     expect(mockParseIssueNumbers).not.toHaveBeenCalled();
     expect(mockResolveIssueTask).not.toHaveBeenCalled();
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.content).toBeUndefined();
@@ -349,27 +360,27 @@ describe('addTask', () => {
     expect(task.auto_pr).toBe(false);
   });
 
-  it('should not create task when piece selection is cancelled', async () => {
-    mockDeterminePiece.mockResolvedValue(null);
+  it('should not create task when workflow selection is cancelled', async () => {
+    mockDetermineWorkflow.mockResolvedValue(null);
 
     await addTask(testDir, 'Task content');
 
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
 
-  it('should not save PR task when piece selection is cancelled', async () => {
+  it('should not save PR task when workflow selection is cancelled', async () => {
     const prReview = createMockPrReview();
     const formattedTask = '## PR #456 Review Comments: Fix auth bug';
-    mockDeterminePiece.mockResolvedValue(null);
+    mockDetermineWorkflow.mockResolvedValue(null);
     mockFetchPrReviewComments.mockReturnValue(prReview);
     mockFormatPrReviewAsTask.mockReturnValue(formattedTask);
 
     await addTaskWithPrOption(testDir, 'placeholder', 456);
 
     expect(mockCheckCliStatus).toHaveBeenCalled();
-    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456);
+    expect(mockFetchPrReviewComments).toHaveBeenCalledWith(456, testDir);
     expect(mockFormatPrReviewAsTask).toHaveBeenCalledWith(prReview);
-    expect(mockDeterminePiece).toHaveBeenCalledTimes(1);
+    expect(mockDetermineWorkflow).toHaveBeenCalledTimes(1);
     expect(fs.existsSync(path.join(testDir, '.takt', 'tasks.yaml'))).toBe(false);
   });
 });

@@ -8,6 +8,9 @@ import { createLogger } from '../../shared/utils/index.js';
 
 const log = createLogger('git');
 
+export const NON_FAST_FORWARD_PUSH_HINT =
+  'Push rejected (non-fast-forward): remote is ahead of this branch. Sync with origin (fetch/pull or reset to remote) or recreate the worktree from the remote tip; a stale local branch as the clone source often causes this.';
+
 export interface StageAndCommitOptions {
   allowGitHooks?: boolean;
   allowGitFilters?: boolean;
@@ -112,24 +115,73 @@ export function checkoutBranch(cwd: string, branch: string): void {
   execFileSync('git', ['checkout', branch], { cwd, stdio: 'pipe' });
 }
 
+function throwPushFailureWithStderr(err: unknown, extraHint: string): never {
+  const stderr = ((err as { stderr?: Buffer }).stderr ?? Buffer.alloc(0)).toString();
+  const base = err instanceof Error ? err.message : String(err);
+  if (stderr && /non-fast-forward/i.test(stderr)) {
+    throw new Error(
+      `${base}\n${stderr.trim()}\n${extraHint}`,
+    );
+  }
+  throw err;
+}
+
 /**
  * Throws on failure.
  */
 export function pushBranch(cwd: string, branch: string): void {
   log.info('Pushing branch to origin', { branch });
-  execFileSync('git', ['push', 'origin', branch], {
-    cwd,
+  try {
+    execFileSync('git', ['push', 'origin', branch], {
+      cwd,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    throwPushFailureWithStderr(err, NON_FAST_FORWARD_PUSH_HINT);
+  }
+}
+
+export function materializeCloneHeadToRootBranch(cloneCwd: string, rootCwd: string, branch: string): void {
+  log.info('Materializing clone HEAD to root branch', { cloneCwd, rootCwd, branch });
+  execFileSync('git', ['fetch', cloneCwd, `HEAD:refs/heads/${branch}`], {
+    cwd: rootCwd,
     stdio: 'pipe',
   });
 }
 
 /**
- * Pushes the current HEAD to the target origin branch. Throws on failure.
+ * Relay push: fetches clone HEAD into a temporary ref in the root repo,
+ * pushes that ref to origin, then cleans up the temp ref (always, even on failure).
+ *
+ * This avoids the unsafe `git push <projectDir> HEAD` pattern which can push
+ * to a checked-out branch and cause data loss.
  */
 export function pushHeadToOriginBranch(cwd: string, branch: string): void {
   log.info('Pushing HEAD to origin branch', { branch });
-  execFileSync('git', ['push', 'origin', `HEAD:refs/heads/${branch}`], {
-    cwd,
-    stdio: 'pipe',
-  });
+  try {
+    execFileSync('git', ['push', 'origin', `HEAD:refs/heads/${branch}`], {
+      cwd,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    throwPushFailureWithStderr(err, NON_FAST_FORWARD_PUSH_HINT);
+  }
+}
+
+export function relayPushCloneToOrigin(cloneCwd: string, rootCwd: string, branch: string): void {
+  const tempRef = `refs/takt-relay/${branch}`;
+  log.info('Relay push: fetching clone HEAD', { cloneCwd, rootCwd, tempRef });
+  try {
+    execFileSync('git', ['fetch', cloneCwd, `HEAD:${tempRef}`], { cwd: rootCwd, stdio: 'pipe' });
+    log.info('Relay push: pushing to origin', { rootCwd, branch });
+    execFileSync('git', ['push', 'origin', `${tempRef}:refs/heads/${branch}`], { cwd: rootCwd, stdio: 'pipe' });
+    log.info('Relay push: succeeded', { rootCwd, branch });
+  } finally {
+    try {
+      execFileSync('git', ['update-ref', '-d', tempRef], { cwd: rootCwd, stdio: 'pipe' });
+      log.debug('Relay push: temp ref cleaned up', { tempRef });
+    } catch {
+      log.debug('Relay push: temp ref cleanup failed (non-fatal)', { tempRef });
+    }
+  }
 }

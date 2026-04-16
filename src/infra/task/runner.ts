@@ -1,4 +1,4 @@
-import type { TaskFileData } from './schema.js';
+import type { TaskFileData, TaskFailure } from './schema.js';
 import type { TaskInfo, TaskResult, TaskListItem } from './types.js';
 import type { TaskStatus } from './schema.js';
 import { TaskStore } from './store.js';
@@ -6,8 +6,14 @@ import { TaskLifecycleService } from './taskLifecycleService.js';
 import { TaskQueryService } from './taskQueryService.js';
 import { TaskDeletionService } from './taskDeletionService.js';
 import { TaskExceedService, type ExceedTaskOptions } from './taskExceedService.js';
+import type { WorkflowResumePoint } from '../../core/models/index.js';
+import { TaskRetryService } from './taskRetryService.js';
 
 export type { TaskInfo, TaskResult, TaskListItem };
+
+export interface TaskRunnerOptions {
+  onWarning?: (warning: string) => void;
+}
 
 export class TaskRunner {
   private readonly store: TaskStore;
@@ -16,14 +22,19 @@ export class TaskRunner {
   private readonly query: TaskQueryService;
   private readonly deletion: TaskDeletionService;
   private readonly exceed: TaskExceedService;
+  private readonly retry: TaskRetryService;
 
-  constructor(private readonly projectDir: string) {
+  constructor(
+    private readonly projectDir: string,
+    options?: TaskRunnerOptions,
+  ) {
     this.store = new TaskStore(projectDir);
     this.tasksFile = this.store.getTasksFilePath();
-    this.lifecycle = new TaskLifecycleService(projectDir, this.tasksFile, this.store);
+    this.lifecycle = new TaskLifecycleService(projectDir, this.tasksFile, this.store, options?.onWarning);
     this.query = new TaskQueryService(projectDir, this.tasksFile, this.store);
     this.deletion = new TaskDeletionService(this.store);
     this.exceed = new TaskExceedService(this.store);
+    this.retry = new TaskRetryService(projectDir, this.tasksFile, this.store);
   }
 
   ensureDirs(): void {
@@ -67,6 +78,21 @@ export class TaskRunner {
     return this.lifecycle.failTask(result);
   }
 
+  forceFailRunningTask(taskName: string, failure: TaskFailure): string {
+    return this.lifecycle.forceFailRunningTask(taskName, failure);
+  }
+
+  updateRunningTaskExecution(
+    taskName: string,
+    execution: {
+      runSlug: string;
+      worktreePath?: string;
+      branch?: string;
+    },
+  ): TaskInfo {
+    return this.lifecycle.updateRunningTaskExecution(taskName, execution);
+  }
+
   prFailTask(result: TaskResult, prError: string): string {
     return this.lifecycle.prFailTask(result, prError);
   }
@@ -87,26 +113,28 @@ export class TaskRunner {
     return this.query.listExceededTasks();
   }
 
-  requeueFailedTask(taskRef: string, startMovement?: string, retryNote?: string): string {
-    return this.lifecycle.requeueFailedTask(taskRef, startMovement, retryNote);
+  requeueFailedTask(taskRef: string, startStep?: string, retryNote?: string): string {
+    return this.retry.requeueFailedTask(taskRef, startStep, retryNote);
   }
 
   requeueTask(
     taskRef: string,
     allowedStatuses: readonly TaskStatus[],
-    startMovement?: string,
+    startStep?: string,
     retryNote?: string,
+    resumePoint?: WorkflowResumePoint,
   ): string {
-    return this.lifecycle.requeueTask(taskRef, allowedStatuses, startMovement, retryNote);
+    return this.retry.requeueTask(taskRef, allowedStatuses, startStep, retryNote, resumePoint);
   }
 
   startReExecution(
     taskRef: string,
     allowedStatuses: readonly TaskStatus[],
-    startMovement?: string,
+    startStep?: string,
     retryNote?: string,
+    resumePoint?: WorkflowResumePoint,
   ): TaskInfo {
-    return this.lifecycle.startReExecution(taskRef, allowedStatuses, startMovement, retryNote);
+    return this.retry.startReExecution(taskRef, allowedStatuses, startStep, retryNote, resumePoint);
   }
 
   deleteTask(name: string, kind: 'pending' | 'failed' | 'completed' | 'exceeded' | 'pr_failed'): void {

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
+import { unexpectedStepPermissionOverrideKey } from '../../test/helpers/unknown-contract-test-keys.js';
 
 const testHomeDir = join(tmpdir(), `takt-gpp-test-${Date.now()}`);
 
@@ -27,6 +28,7 @@ describe('global provider_profiles', () => {
     if (existsSync(testHomeDir)) {
       rmSync(testHomeDir, { recursive: true });
     }
+    delete process.env.TAKT_PROVIDER_PROFILES;
   });
 
   it('loads provider_profiles from yaml', () => {
@@ -39,7 +41,7 @@ describe('global provider_profiles', () => {
         'provider_profiles:',
         '  codex:',
         '    default_permission_mode: full',
-        '    movement_permission_overrides:',
+        '    step_permission_overrides:',
         '      ai_fix: edit',
       ].join('\n'),
       'utf-8',
@@ -48,7 +50,167 @@ describe('global provider_profiles', () => {
     const config = loadGlobalConfig();
 
     expect(config.providerProfiles?.codex?.defaultPermissionMode).toBe('full');
-    expect(config.providerProfiles?.codex?.movementPermissionOverrides?.ai_fix).toBe('edit');
+    expect(config.providerProfiles?.codex?.stepPermissionOverrides?.ai_fix).toBe('edit');
+  });
+
+  it('loads step_permission_overrides from yaml', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  codex:',
+        '    default_permission_mode: full',
+        '    step_permission_overrides:',
+        '      ai_fix: edit',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const config = loadGlobalConfig();
+
+    expect(config.providerProfiles?.codex?.stepPermissionOverrides?.ai_fix).toBe('edit');
+  });
+
+  it('loads provider_profiles from TAKT_PROVIDER_PROFILES env override', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  cursor:',
+        '    default_permission_mode: full',
+      ].join('\n'),
+      'utf-8',
+    );
+    process.env.TAKT_PROVIDER_PROFILES = JSON.stringify({
+      codex: {
+        default_permission_mode: 'edit',
+        step_permission_overrides: {
+          ai_fix: 'full',
+        },
+      },
+    });
+
+    try {
+      const config = loadGlobalConfig();
+
+      expect(config.providerProfiles).toEqual({
+        codex: {
+          defaultPermissionMode: 'edit',
+          stepPermissionOverrides: {
+            ai_fix: 'full',
+          },
+        },
+      });
+    } finally {
+      delete process.env.TAKT_PROVIDER_PROFILES;
+    }
+  });
+
+  it('prefers TAKT_PROVIDER_PROFILES env override over yaml provider_profiles', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  codex:',
+        '    default_permission_mode: full',
+        '    step_permission_overrides:',
+        '      ai_fix: edit',
+      ].join('\n'),
+      'utf-8',
+    );
+    process.env.TAKT_PROVIDER_PROFILES = JSON.stringify({
+      codex: {
+        default_permission_mode: 'readonly',
+        step_permission_overrides: {
+          ai_fix: 'full',
+        },
+      },
+    });
+
+    try {
+      const config = loadGlobalConfig();
+
+      expect(config.providerProfiles).toEqual({
+        codex: {
+          defaultPermissionMode: 'readonly',
+          stepPermissionOverrides: {
+            ai_fix: 'full',
+          },
+        },
+      });
+    } finally {
+      delete process.env.TAKT_PROVIDER_PROFILES;
+    }
+  });
+
+  it('rejects unknown provider profile override keys', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  codex:',
+        '    default_permission_mode: full',
+        `    ${unexpectedStepPermissionOverrideKey}:`,
+        '      ai_fix: edit',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(() => loadGlobalConfig()).toThrow(new RegExp(`${unexpectedStepPermissionOverrideKey}|unrecognized`, 'i'));
+  });
+
+  it('rejects duplicate step_permission_overrides keys at YAML parse time', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  codex:',
+        '    default_permission_mode: full',
+        '    step_permission_overrides:',
+        '      ai_fix: edit',
+        '    step_permission_overrides:',
+        '      supervise: full',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(() => loadGlobalConfig()).toThrow(/Map keys must be unique/i);
+  });
+
+  it('rejects duplicate step_permission_overrides keys before custom validation', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(
+      getGlobalConfigPath(),
+      [
+        'language: en',
+        'provider_profiles:',
+        '  codex:',
+        '    default_permission_mode: full',
+        '    step_permission_overrides:',
+        '      ai_fix: edit',
+        '    step_permission_overrides:',
+        '      ai_fix: full',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(() => loadGlobalConfig()).toThrow(/Map keys must be unique/i);
   });
 
   it('saves provider_profiles to yaml', () => {
@@ -60,7 +222,7 @@ describe('global provider_profiles', () => {
     config.providerProfiles = {
       codex: {
         defaultPermissionMode: 'full',
-        movementPermissionOverrides: {
+        stepPermissionOverrides: {
           supervise: 'full',
         },
       },
@@ -70,6 +232,26 @@ describe('global provider_profiles', () => {
 
     const reloaded = loadGlobalConfig();
     expect(reloaded.providerProfiles?.codex?.defaultPermissionMode).toBe('full');
-    expect(reloaded.providerProfiles?.codex?.movementPermissionOverrides?.supervise).toBe('full');
+    expect(reloaded.providerProfiles?.codex?.stepPermissionOverrides?.supervise).toBe('full');
+  });
+
+  it('saves provider_profiles with canonical step_permission_overrides key', () => {
+    const taktDir = join(testHomeDir, '.takt');
+    mkdirSync(taktDir, { recursive: true });
+    writeFileSync(getGlobalConfigPath(), 'language: en\n', 'utf-8');
+
+    const config = loadGlobalConfig();
+    config.providerProfiles = {
+      codex: {
+        defaultPermissionMode: 'full',
+        stepPermissionOverrides: {
+          supervise: 'full',
+        },
+      },
+    };
+    saveGlobalConfig(config);
+
+    const raw = readFileSync(getGlobalConfigPath(), 'utf-8');
+    expect(raw).toContain('step_permission_overrides:');
   });
 });

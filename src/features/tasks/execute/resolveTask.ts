@@ -1,18 +1,28 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { resolvePieceConfigValue } from '../../../infra/config/index.js';
+import {
+  loadWorkflowByIdentifier,
+  resolveWorkflowCallTarget,
+  resolveWorkflowConfigValue,
+} from '../../../infra/config/index.js';
 import {
   type TaskInfo,
   buildTaskInstruction,
-  createSharedClone,
+  createSharedCloneAbortable,
   resolveBaseBranch,
   resolveCloneBaseDir,
   branchExists,
   summarizeTaskName,
+  resolveTaskWorkflowValue,
+  resolveTaskStartStepValue,
+  TaskExecutionConfigSchema,
 } from '../../../infra/task/index.js';
+import type { WorkflowResumePoint } from '../../../core/models/index.js';
+import { trimResumePointStackForWorkflow } from '../../../core/workflow/run/resume-point.js';
 import { getGitProvider, type Issue } from '../../../infra/git/index.js';
 import { withProgress } from '../../../shared/ui/index.js';
-import { createLogger, getErrorMessage, isPathInside } from '../../../shared/utils/index.js';
+import { createLogger, getErrorMessage, isRealPathInside } from '../../../shared/utils/index.js';
+import { generateReportDir } from '../../../shared/utils/reportDir.js';
 import { getTaskSlugFromTaskDir } from '../../../shared/utils/taskPaths.js';
 
 const log = createLogger('task');
@@ -24,7 +34,7 @@ function canReuseWorktreePath(projectDir: string, candidatePath: string): boolea
 
   const cloneBaseDir = resolveCloneBaseDir(projectDir);
   const fallbackCloneBaseDir = path.join(projectDir, '.takt', 'worktrees');
-  return isPathInside(cloneBaseDir, candidatePath) || isPathInside(fallbackCloneBaseDir, candidatePath);
+  return isRealPathInside(cloneBaseDir, candidatePath) || isRealPathInside(fallbackCloneBaseDir, candidatePath);
 }
 
 function resolveTaskDataBaseBranch(taskData: TaskInfo['data']): string | undefined {
@@ -38,20 +48,67 @@ function resolveTaskBaseBranch(projectDir: string, taskData: TaskInfo['data']): 
 
 export interface ResolvedTaskExecution {
   execCwd: string;
-  execPiece: string;
+  workflowIdentifier: string;
   isWorktree: boolean;
+  reportDirName: string;
   taskPrompt?: string;
-  reportDirName?: string;
   branch?: string;
   worktreePath?: string;
   baseBranch?: string;
-  startMovement?: string;
+  startStep?: string;
   retryNote?: string;
+  resumePoint?: WorkflowResumePoint;
   autoPr: boolean;
   draftPr: boolean;
+  shouldPublishBranchToOrigin: boolean;
   issueNumber?: number;
-  maxMovementsOverride?: number;
+  maxStepsOverride?: number;
   initialIterationOverride?: number;
+}
+
+function resolveRetryResume(
+  workflowIdentifier: string,
+  projectCwd: string,
+  lookupCwd: string,
+  configuredStartStep: string | undefined,
+  resumePoint: WorkflowResumePoint | undefined,
+): {
+  startStep?: string;
+  resumePoint?: WorkflowResumePoint;
+} {
+  if (!resumePoint) {
+    return configuredStartStep ? { startStep: configuredStartStep } : {};
+  }
+
+  const workflowConfig = loadWorkflowByIdentifier(workflowIdentifier, projectCwd, { lookupCwd });
+  if (!workflowConfig) {
+    return {
+      ...(configuredStartStep ? { startStep: configuredStartStep } : {}),
+    };
+  }
+
+  const resolvedResumePoint = trimResumePointStackForWorkflow({
+    workflow: workflowConfig,
+    resumePoint,
+    resolveWorkflowCall: (parentWorkflow, step) => resolveWorkflowCallTarget(
+      parentWorkflow,
+      step.call,
+      step.name,
+      projectCwd,
+      lookupCwd,
+    ),
+  });
+  const rootEntry = resolvedResumePoint?.stack[0];
+  if (rootEntry) {
+    return {
+      startStep: rootEntry.step,
+      resumePoint: resolvedResumePoint,
+    };
+  }
+
+  return {
+    ...(configuredStartStep ? { startStep: configuredStartStep } : {}),
+  };
 }
 
 function stageTaskSpecForExecution(
@@ -81,20 +138,20 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-export function resolveTaskIssue(issueNumber: number | undefined): Issue[] | undefined {
+export function resolveTaskIssue(issueNumber: number | undefined, projectCwd: string): Issue[] | undefined {
   if (issueNumber === undefined) {
     return undefined;
   }
 
   const gitProvider = getGitProvider();
-  const cliStatus = gitProvider.checkCliStatus();
+  const cliStatus = gitProvider.checkCliStatus(projectCwd);
   if (!cliStatus.available) {
-    log.info('gh CLI unavailable, skipping issue resolution for PR body', { issueNumber });
+    log.info('VCS CLI unavailable, skipping issue resolution for PR body', { issueNumber });
     return undefined;
   }
 
   try {
-    const issue = gitProvider.fetchIssue(issueNumber);
+    const issue = gitProvider.fetchIssue(issueNumber, projectCwd);
     return [issue];
   } catch (e) {
     log.info('Failed to fetch issue for PR body, continuing without issue info', { issueNumber, error: getErrorMessage(e) });
@@ -111,11 +168,16 @@ export async function resolveTaskExecution(
 
   const data = task.data;
   if (!data) {
-    throw new Error(`Task "${task.name}" is missing required data, including piece.`);
+    throw new Error(`Task "${task.name}" is missing required data, including workflow.`);
   }
 
-  if (!data.piece || typeof data.piece !== 'string' || data.piece.trim() === '') {
-    throw new Error(`Task "${task.name}" is missing required piece.`);
+  const validationData = { ...data } as Record<string, unknown>;
+  delete validationData.task;
+  delete validationData.baseBranch;
+  const normalizedData = TaskExecutionConfigSchema.parse(validationData) as Record<string, unknown>;
+  const workflowIdentifier = resolveTaskWorkflowValue(normalizedData);
+  if (!workflowIdentifier || workflowIdentifier.trim() === '') {
+    throw new Error(`Task "${task.name}" is missing required workflow.`);
   }
 
   let execCwd = defaultCwd;
@@ -136,7 +198,6 @@ export async function resolveTaskExecution(
 
   if (data.worktree) {
     throwIfAborted(abortSignal);
-    // baseBranch resolution is only needed to create a new branch; for existing branches it's just metadata.
     const targetBranch = data.branch;
     const needsBaseBranch = !targetBranch || !branchExists(defaultCwd, targetBranch);
     baseBranch = needsBaseBranch
@@ -159,13 +220,13 @@ export async function resolveTaskExecution(
       const result = await withProgress(
         'Creating clone...',
         (cloneResult) => `Clone created: ${cloneResult.path} (branch: ${cloneResult.branch})`,
-        async () => createSharedClone(defaultCwd, {
+        async () => createSharedCloneAbortable(defaultCwd, {
           worktree: data.worktree!,
           branch: data.branch,
           ...(preferredBaseBranch ? { baseBranch: preferredBaseBranch } : {}),
           taskSlug,
           issueNumber: data.issue,
-        }),
+        }, abortSignal),
       );
       throwIfAborted(abortSignal);
       execCwd = result.path;
@@ -179,30 +240,41 @@ export async function resolveTaskExecution(
     taskPrompt = stageTaskSpecForExecution(defaultCwd, execCwd, task.taskDir, reportDirName);
   }
 
-  const execPiece = data.piece;
-  const startMovement = data.start_movement;
+  const resolvedReportDirName = reportDirName ?? generateReportDir(taskPrompt ?? task.content);
+  const configuredStartStep = resolveTaskStartStepValue(normalizedData);
+  const retryResume = resolveRetryResume(
+    workflowIdentifier,
+    defaultCwd,
+    execCwd,
+    configuredStartStep,
+    normalizedData.resume_point as WorkflowResumePoint | undefined,
+  );
   const retryNote = data.retry_note;
-  const maxMovementsOverride = data.exceeded_max_movements;
-  const initialIterationOverride = data.exceeded_current_iteration;
+  const maxStepsOverride = data.exceeded_max_steps;
+  const initialIterationOverride = data.exceeded_current_iteration ?? retryResume.resumePoint?.iteration;
 
-  const autoPr = data.auto_pr ?? resolvePieceConfigValue(defaultCwd, 'autoPr') ?? false;
-  const draftPr = data.draft_pr ?? resolvePieceConfigValue(defaultCwd, 'draftPr') ?? false;
+  const autoPr = data.auto_pr ?? resolveWorkflowConfigValue(defaultCwd, 'autoPr') ?? false;
+  const draftPr = data.draft_pr ?? resolveWorkflowConfigValue(defaultCwd, 'draftPr') ?? false;
+  const shouldPublishBranchToOrigin =
+    normalizedData.should_publish_branch_to_origin === true || autoPr;
 
   return {
     execCwd,
-    execPiece,
+    workflowIdentifier,
     isWorktree,
+    reportDirName: resolvedReportDirName,
     autoPr,
     draftPr,
+    shouldPublishBranchToOrigin,
     ...(taskPrompt ? { taskPrompt } : {}),
-    ...(reportDirName ? { reportDirName } : {}),
     ...(branch ? { branch } : {}),
     ...(worktreePath ? { worktreePath } : {}),
     ...(baseBranch ? { baseBranch } : {}),
-    ...(startMovement ? { startMovement } : {}),
+    ...(retryResume.startStep ? { startStep: retryResume.startStep } : {}),
     ...(retryNote ? { retryNote } : {}),
+    ...(retryResume.resumePoint ? { resumePoint: retryResume.resumePoint } : {}),
     ...(data.issue !== undefined ? { issueNumber: data.issue } : {}),
-    ...(maxMovementsOverride !== undefined ? { maxMovementsOverride } : {}),
+    ...(maxStepsOverride !== undefined ? { maxStepsOverride } : {}),
     ...(initialIterationOverride !== undefined ? { initialIterationOverride } : {}),
   };
 }

@@ -99,7 +99,7 @@ describe('saveTaskFile', () => {
 
   it('should include optional fields', async () => {
     await saveTaskFile(testDir, 'Task', {
-      piece: 'review',
+      workflow: 'review',
       issue: 42,
       worktree: true,
       branch: 'feat/my-branch',
@@ -107,7 +107,7 @@ describe('saveTaskFile', () => {
     });
 
     const task = loadTasks(testDir).tasks[0]!;
-    expect(task.piece).toBe('review');
+    expect(task.workflow).toBe('review');
     expect(task.issue).toBe(42);
     expect(task.worktree).toBe(true);
     expect(task.branch).toBe('feat/my-branch');
@@ -115,9 +115,27 @@ describe('saveTaskFile', () => {
     expect(task.task_dir).toBeTypeOf('string');
   });
 
+  it('should persist workflow key', async () => {
+    await saveTaskFile(testDir, 'Task', {
+      workflow: 'review',
+    });
+
+    const task = loadTasks(testDir).tasks[0]!;
+    expect(task.workflow).toBe('review');
+  });
+
+  it('should accept canonical workflow option and persist workflow key', async () => {
+    await saveTaskFile(testDir, 'Task', {
+      workflow: 'review',
+    });
+
+    const task = loadTasks(testDir).tasks[0]!;
+    expect(task.workflow).toBe('review');
+  });
+
   it('should persist base_branch when it is provided', async () => {
     await saveTaskFile(testDir, 'Task', {
-      piece: 'review',
+      workflow: 'review',
       issue: 42,
       worktree: true,
       branch: 'feature/bugfix',
@@ -137,6 +155,21 @@ describe('saveTaskFile', () => {
     const task = loadTasks(testDir).tasks[0]!;
     expect(task.auto_pr).toBe(true);
     expect(task.draft_pr).toBe(true);
+  });
+
+  it('should persist should_publish_branch_to_origin when shouldPublishBranchToOrigin is true', async () => {
+    await saveTaskFile(testDir, 'PR fix task', {
+      worktree: true,
+      branch: 'takt/1/fix',
+      autoPr: false,
+      shouldPublishBranchToOrigin: true,
+    });
+
+    const task = loadTasks(testDir).tasks[0]!;
+    expect(task.should_publish_branch_to_origin).toBe(true);
+    expect(task.worktree).toBe(true);
+    expect(task.branch).toBe('takt/1/fix');
+    expect(task.auto_pr).toBe(false);
   });
 
   it('should generate unique names on duplicates', async () => {
@@ -183,14 +216,14 @@ describe('saveTaskFromInteractive', () => {
     expect(task.auto_pr).toBe(false);
   });
 
-  it('should display piece info when specified', async () => {
+  it('should display workflow info when specified', async () => {
     mockPromptInput.mockResolvedValueOnce('');
     mockPromptInput.mockResolvedValueOnce('');
     mockConfirm.mockResolvedValueOnce(false);
 
     await saveTaskFromInteractive(testDir, 'Task content', 'review');
 
-    expect(mockInfo).toHaveBeenCalledWith('  Piece: review');
+    expect(mockInfo).toHaveBeenCalledWith('  Workflow: review');
   });
 
   it('should record issue number in tasks.yaml when issue option is provided', async () => {

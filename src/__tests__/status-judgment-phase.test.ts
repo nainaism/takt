@@ -1,14 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { PieceMovement } from '../core/models/types.js';
-import { runStatusJudgmentPhase } from '../core/piece/status-judgment-phase.js';
-
-const { mockJudgeStatus } = vi.hoisted(() => ({
-  mockJudgeStatus: vi.fn(),
-}));
-
-vi.mock('../agents/agent-usecases.js', () => ({
-  judgeStatus: mockJudgeStatus,
-}));
+import type { WorkflowStep } from '../core/models/types.js';
+import { runStatusJudgmentPhase } from '../core/workflow/status-judgment-phase.js';
 
 describe('runStatusJudgmentPhase', () => {
   beforeEach(() => {
@@ -16,7 +8,8 @@ describe('runStatusJudgmentPhase', () => {
   });
 
   it('should pass judge stage callbacks through PhaseRunnerContext', async () => {
-    mockJudgeStatus.mockImplementation(
+    const structuredCaller = {
+      judgeStatus: vi.fn().mockImplementation(
       async (_structured: string, _tag: string, _rules: unknown[], options: { onJudgeStage?: (entry: {
         stage: 1 | 2 | 3;
         method: 'structured_output' | 'phase3_tag' | 'ai_judge';
@@ -37,9 +30,10 @@ describe('runStatusJudgmentPhase', () => {
         });
         return { ruleIndex: 1, method: 'structured_output' as const };
       },
-    );
+      ),
+    };
 
-    const step: PieceMovement = {
+    const step: WorkflowStep = {
       name: 'review',
       persona: 'reviewer',
       personaDisplayName: 'reviewer',
@@ -63,6 +57,8 @@ describe('runStatusJudgmentPhase', () => {
       buildResumeOptions: vi.fn(),
       buildNewSessionReportOptions: vi.fn(),
       updatePersonaSession: vi.fn(),
+      resolveProvider: vi.fn().mockReturnValue('cursor'),
+      structuredCaller,
       onPhaseStart,
       onPhaseComplete,
       onJudgeStage,
@@ -97,9 +93,11 @@ describe('runStatusJudgmentPhase', () => {
   });
 
   it('should fail fast when iteration is missing', async () => {
-    mockJudgeStatus.mockResolvedValue({ ruleIndex: 0, method: 'structured_output' });
+    const structuredCaller = {
+      judgeStatus: vi.fn().mockResolvedValue({ ruleIndex: 0, method: 'structured_output' }),
+    };
 
-    const step: PieceMovement = {
+    const step: WorkflowStep = {
       name: 'review',
       persona: 'reviewer',
       personaDisplayName: 'reviewer',
@@ -119,6 +117,8 @@ describe('runStatusJudgmentPhase', () => {
       buildResumeOptions: vi.fn(),
       buildNewSessionReportOptions: vi.fn(),
       updatePersonaSession: vi.fn(),
-    })).rejects.toThrow('Status judgment requires iteration for movement "review"');
+      resolveProvider: vi.fn().mockReturnValue('cursor'),
+      structuredCaller,
+    })).rejects.toThrow('Status judgment requires iteration for step "review"');
   });
 });

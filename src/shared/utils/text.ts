@@ -43,11 +43,44 @@ const ANSI_PATTERN = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x
 
 /**
  * Strip all ANSI escape sequences from a string.
- * Removes CSI sequences (colors, cursor movement, etc.),
+ * Removes CSI sequences (colors, cursor motion, etc.),
  * OSC sequences, and other single-character escape codes.
  */
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
+}
+
+/**
+ * Sanitize terminal-bound text by removing ANSI escapes and visualizing control characters.
+ */
+export function sanitizeTerminalText(text: string): string {
+  const stripped = stripAnsi(text);
+  let sanitized = '';
+
+  for (const char of stripped) {
+    const code = char.codePointAt(0) ?? 0;
+    if ((code >= 0x00 && code <= 0x1f) || code === 0x7f) {
+      switch (char) {
+        case '\n':
+          sanitized += '\\n';
+          break;
+        case '\r':
+          sanitized += '\\r';
+          break;
+        case '\t':
+          sanitized += '\\t';
+          break;
+        default:
+          sanitized += `\\x${code.toString(16).padStart(2, '0')}`;
+          break;
+      }
+      continue;
+    }
+
+    sanitized += char;
+  }
+
+  return sanitized;
 }
 
 /**

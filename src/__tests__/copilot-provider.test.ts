@@ -53,22 +53,9 @@ describe('CopilotProvider', () => {
     mockLoadProjectConfig.mockReturnValue({});
   });
 
-  it('should throw when claudeAgent is specified', () => {
-    const provider = new CopilotProvider();
-
-    expect(() => provider.setup({
-      name: 'test',
-      claudeAgent: 'some-agent',
-    })).toThrow('Claude Code agent calls are not supported by the Copilot provider');
-  });
-
-  it('should throw when claudeSkill is specified', () => {
-    const provider = new CopilotProvider();
-
-    expect(() => provider.setup({
-      name: 'test',
-      claudeSkill: 'some-skill',
-    })).toThrow('Claude Code skill calls are not supported by the Copilot provider');
+  it('should mark supportsStructuredOutput as false', () => {
+    const provider = new CopilotProvider() as { supportsStructuredOutput?: boolean };
+    expect(provider.supportsStructuredOutput).toBe(false);
   });
 
   it('should pass model/session/permission and resolved token to callCopilot', async () => {

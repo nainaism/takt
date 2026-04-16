@@ -7,12 +7,14 @@
 
 import * as fs from 'node:fs';
 import type { TaskListItem } from '../../../infra/task/index.js';
-import { TaskRunner } from '../../../infra/task/index.js';
-import { loadPieceByIdentifier, resolvePieceConfigValue, getPieceDescription } from '../../../infra/config/index.js';
+import { TaskRunner, resolveTaskWorkflowValue } from '../../../infra/task/index.js';
+import { loadWorkflowByIdentifier, resolveWorkflowConfigValue, getWorkflowDescription } from '../../../infra/config/index.js';
+import { validateWorkflowExecutionTrustBoundary } from '../../../infra/config/loaders/workflowTrustBoundary.js';
 import { selectOptionWithDefault } from '../../../shared/prompt/index.js';
 import { info, header, blankLine, status, warn } from '../../../shared/ui/index.js';
 import { createLogger } from '../../../shared/utils/index.js';
-import type { PieceConfig } from '../../../core/models/index.js';
+import type { WorkflowConfig, WorkflowResumePoint } from '../../../core/models/index.js';
+import { readRunMetaBySlug } from '../../../core/workflow/run/run-meta.js';
 import {
   findRunForTask,
   loadRunSessionContext,
@@ -29,48 +31,50 @@ import {
   appendRetryNote,
   DEPRECATED_PROVIDER_CONFIG_WARNING,
   hasDeprecatedProviderConfig,
-  selectPieceWithOptionalReuse,
+  selectWorkflowWithOptionalReuse,
 } from './requeueHelpers.js';
 import { prepareTaskForExecution } from './prepareTaskForExecution.js';
+import { sanitizeTerminalText } from '../../../shared/utils/text.js';
+import { workflowEntryMatchesWorkflow } from '../../../core/workflow/workflow-reference.js';
 
 const log = createLogger('list-tasks');
 
 function displayFailureInfo(task: TaskListItem): void {
-  header(`Failed Task: ${task.name}`);
+  header(`Failed Task: ${sanitizeTerminalText(task.name)}`);
   info(`  Failed at: ${task.createdAt}`);
 
   if (task.failure) {
     blankLine();
-    if (task.failure.movement) {
-      status('Failed at', task.failure.movement, 'red');
+    if (task.failure.step) {
+      status('Failed at', sanitizeTerminalText(task.failure.step), 'red');
     }
-    status('Error', task.failure.error, 'red');
+    status('Error', sanitizeTerminalText(task.failure.error), 'red');
     if (task.failure.last_message) {
-      status('Last message', task.failure.last_message);
+      status('Last message', sanitizeTerminalText(task.failure.last_message));
     }
   }
 
   blankLine();
 }
 
-async function selectStartMovement(
-  pieceConfig: PieceConfig,
-  defaultMovement: string | null,
+async function selectStartStep(
+  workflowConfig: WorkflowConfig,
+  defaultStep: string | null,
 ): Promise<string | null> {
-  const movements = pieceConfig.movements.map((m) => m.name);
+  const steps = workflowConfig.steps.map((step) => step.name);
 
-  const defaultIdx = defaultMovement
-    ? movements.indexOf(defaultMovement)
+  const defaultIdx = defaultStep
+    ? steps.indexOf(defaultStep)
     : 0;
-  const effectiveDefault = defaultIdx >= 0 ? movements[defaultIdx] : movements[0];
+  const effectiveDefault = defaultIdx >= 0 ? steps[defaultIdx] : steps[0];
 
-  const options = movements.map((name) => ({
-    label: name,
+  const options = steps.map((name) => ({
+    label: sanitizeTerminalText(name),
     value: name,
-    description: name === pieceConfig.initialMovement ? 'Initial movement' : undefined,
+    description: name === workflowConfig.initialStep ? 'Initial step' : undefined,
   }));
 
-  return await selectOptionWithDefault<string>('Start from movement:', options, effectiveDefault ?? movements[0]!);
+  return await selectOptionWithDefault<string>('Start from step:', options, effectiveDefault ?? steps[0]!);
 }
 
 function buildRetryFailureInfo(task: TaskListItem): RetryFailureInfo {
@@ -78,7 +82,7 @@ function buildRetryFailureInfo(task: TaskListItem): RetryFailureInfo {
     taskName: task.name,
     taskContent: task.content,
     createdAt: task.createdAt,
-    failedMovement: task.failure?.movement ?? '',
+    failedStep: task.failure?.step ?? '',
     error: task.failure?.error ?? '',
     lastMessage: task.failure?.last_message ?? '',
     retryNote: task.data?.retry_note ?? '',
@@ -96,11 +100,61 @@ function buildRetryRunInfo(
     logsDir: paths.logsDir,
     reportsDir: paths.reportsDir,
     task: formatted.runTask,
-    piece: formatted.runPiece,
+    workflow: formatted.runWorkflow,
     status: formatted.runStatus,
-    movementLogs: formatted.runMovementLogs,
+    stepLogs: formatted.runStepLogs,
     reports: formatted.runReports,
   };
+}
+
+function resolveRetryResumePoint(
+  task: TaskListItem,
+  worktreePath: string,
+  matchedSlug: string | null,
+): WorkflowResumePoint | undefined {
+  if (matchedSlug) {
+    const runMeta = readRunMetaBySlug(worktreePath, matchedSlug, (warningMessage) => {
+      warn(warningMessage);
+    });
+    const metaResumePoint = runMeta?.resumePoint;
+    if (metaResumePoint) {
+      return metaResumePoint;
+    }
+  }
+
+  return task.data?.resume_point;
+}
+
+function resolveRetryDefaultStep(
+  workflowConfig: WorkflowConfig,
+  task: TaskListItem,
+  resumePoint: WorkflowResumePoint | undefined,
+): string | null {
+  const rootEntry = resumePoint?.stack[0];
+  if (
+    rootEntry
+    && workflowEntryMatchesWorkflow(rootEntry, workflowConfig)
+    && workflowConfig.steps.some((step) => step.name === rootEntry.step)
+  ) {
+    return rootEntry.step;
+  }
+
+  return task.failure?.step ?? null;
+}
+
+function shouldResumeFromSelectedStep(
+  workflowConfig: WorkflowConfig,
+  selectedStep: string,
+  resumePoint: WorkflowResumePoint | undefined,
+): resumePoint is WorkflowResumePoint {
+  const rootEntry = resumePoint?.stack[0];
+  if (!rootEntry) {
+    return false;
+  }
+
+  return workflowEntryMatchesWorkflow(rootEntry, workflowConfig)
+    && rootEntry.step === selectedStep
+    && workflowConfig.steps.some((step) => step.name === rootEntry.step);
 }
 
 function resolveWorktreePath(task: TaskListItem): string {
@@ -136,30 +190,41 @@ export async function retryFailedTask(
   const matchedSlug = findRunForTask(worktreePath, task.content);
   const runInfo = matchedSlug ? buildRetryRunInfo(worktreePath, matchedSlug) : null;
 
-  const selectedPiece = await selectPieceWithOptionalReuse(projectDir, task.data?.piece);
-  if (!selectedPiece) {
+  const selectedWorkflow = await selectWorkflowWithOptionalReuse(
+    projectDir,
+    task.data ? resolveTaskWorkflowValue(task.data as Record<string, unknown>) : undefined,
+  );
+  if (!selectedWorkflow) {
     info('Cancelled');
     return false;
   }
 
-  const previewCount = resolvePieceConfigValue(projectDir, 'interactivePreviewMovements');
-  const pieceConfig = loadPieceByIdentifier(selectedPiece, projectDir);
+  const previewCount = resolveWorkflowConfigValue(projectDir, 'interactivePreviewSteps');
+  const workflowConfig = loadWorkflowByIdentifier(selectedWorkflow, projectDir, { lookupCwd: worktreePath });
 
-  if (!pieceConfig) {
-    throw new Error(`Piece "${selectedPiece}" not found after selection.`);
+  if (!workflowConfig) {
+    throw new Error(`Workflow "${sanitizeTerminalText(selectedWorkflow)}" not found after selection.`);
   }
+  validateWorkflowExecutionTrustBoundary(workflowConfig, projectDir);
 
-  const selectedMovement = await selectStartMovement(pieceConfig, task.failure?.movement ?? null);
-  if (selectedMovement === null) {
+  const resumePoint = resolveRetryResumePoint(task, worktreePath, matchedSlug);
+  const selectedStep = await selectStartStep(
+    workflowConfig,
+    resolveRetryDefaultStep(workflowConfig, task, resumePoint),
+  );
+  if (selectedStep === null) {
     return false;
   }
+  const selectedResumePoint = shouldResumeFromSelectedStep(workflowConfig, selectedStep, resumePoint)
+    ? resumePoint
+    : undefined;
 
-  const pieceDesc = getPieceDescription(selectedPiece, projectDir, previewCount);
-  const pieceContext = {
-    name: pieceDesc.name,
-    description: pieceDesc.description,
-    pieceStructure: pieceDesc.pieceStructure,
-    movementPreviews: pieceDesc.movementPreviews,
+  const workflowDesc = getWorkflowDescription(selectedWorkflow, projectDir, previewCount, worktreePath);
+  const workflowContext = {
+    name: workflowDesc.name,
+    description: workflowDesc.description,
+    workflowStructure: workflowDesc.workflowStructure,
+    stepPreviews: workflowDesc.stepPreviews,
   };
 
   // Runs data lives in the worktree (written during previous execution)
@@ -173,7 +238,7 @@ export async function retryFailedTask(
   const retryContext: RetryContext = {
     failure: buildRetryFailureInfo(task),
     branchName,
-    pieceContext,
+    workflowContext,
     run: runInfo,
     previousOrderContent,
   };
@@ -183,25 +248,31 @@ export async function retryFailedTask(
     return false;
   }
 
-  const startMovement = selectedMovement !== pieceConfig.initialMovement
-    ? selectedMovement
+  const startStep = selectedStep !== workflowConfig.initialStep
+    ? selectedStep
     : undefined;
   const retryNote = appendRetryNote(task.data?.retry_note, retryResult.task);
   const runner = new TaskRunner(projectDir);
 
   if (retryResult.action === 'save_task') {
-    runner.requeueTask(task.name, ['failed'], startMovement, retryNote);
-    info(`Task "${task.name}" has been requeued.`);
+    if (selectedResumePoint) {
+      runner.requeueTask(task.name, ['failed'], startStep, retryNote, selectedResumePoint);
+    } else {
+      runner.requeueTask(task.name, ['failed'], startStep, retryNote);
+    }
+    info(`Task "${sanitizeTerminalText(task.name)}" has been requeued.`);
     return true;
   }
 
-  const taskInfo = runner.startReExecution(task.name, ['failed'], startMovement, retryNote);
-  const taskForExecution = prepareTaskForExecution(taskInfo, selectedPiece);
+  const taskInfo = selectedResumePoint
+    ? runner.startReExecution(task.name, ['failed'], startStep, retryNote, selectedResumePoint)
+    : runner.startReExecution(task.name, ['failed'], startStep, retryNote);
+  const taskForExecution = prepareTaskForExecution(taskInfo, selectedWorkflow);
 
   log.info('Starting re-execution of failed task', {
     name: task.name,
     worktreePath,
-    startMovement,
+    startStep,
   });
 
   return executeAndCompleteTask(taskForExecution, runner, projectDir);

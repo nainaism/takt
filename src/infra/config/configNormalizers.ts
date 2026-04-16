@@ -1,7 +1,7 @@
-import type { MovementProviderOptions, PieceRuntimeConfig } from '../../core/models/piece-types.js';
+import type { StepProviderOptions, WorkflowRuntimeConfig } from '../../core/models/workflow-types.js';
 import type { ProviderPermissionProfiles } from '../../core/models/provider-profiles.js';
 import type {
-  PieceOverrides,
+  WorkflowOverrides,
   PersonaProviderEntry,
   PipelineConfig,
   TaktProviderConfigEntry,
@@ -11,7 +11,7 @@ import { validateProviderModelCompatibility } from './providerModelCompatibility
 
 export function normalizeRuntime(
   runtime: { prepare?: string[] } | undefined,
-): PieceRuntimeConfig | undefined {
+): WorkflowRuntimeConfig | undefined {
   if (!runtime?.prepare || runtime.prepare.length === 0) {
     return undefined;
   }
@@ -19,77 +19,83 @@ export function normalizeRuntime(
 }
 
 export function normalizeProviderProfiles(
-  raw: Record<string, { default_permission_mode: unknown; movement_permission_overrides?: Record<string, unknown> }> | undefined,
+  raw: Record<string, {
+    default_permission_mode: string;
+    step_permission_overrides?: Record<string, string>;
+  }> | undefined,
 ): ProviderPermissionProfiles | undefined {
   if (!raw) return undefined;
 
-  const entries = Object.entries(raw).map(([provider, profile]) => [provider, {
-    defaultPermissionMode: profile.default_permission_mode,
-    movementPermissionOverrides: profile.movement_permission_overrides,
-  }]);
+  const entries = Object.entries(raw).map(([provider, profile]) => [
+    provider,
+    {
+      defaultPermissionMode: profile.default_permission_mode,
+      stepPermissionOverrides: profile.step_permission_overrides,
+    },
+  ]);
 
   return Object.fromEntries(entries) as ProviderPermissionProfiles;
 }
 
 export function denormalizeProviderProfiles(
   profiles: ProviderPermissionProfiles | undefined,
-): Record<string, { default_permission_mode: string; movement_permission_overrides?: Record<string, string> }> | undefined {
+): Record<string, { default_permission_mode: string; step_permission_overrides?: Record<string, string> }> | undefined {
   if (!profiles) return undefined;
   const entries = Object.entries(profiles);
   if (entries.length === 0) return undefined;
 
   return Object.fromEntries(entries.map(([provider, profile]) => [provider, {
     default_permission_mode: profile.defaultPermissionMode,
-    ...(profile.movementPermissionOverrides
-      ? { movement_permission_overrides: profile.movementPermissionOverrides }
+    ...(profile.stepPermissionOverrides
+      ? { step_permission_overrides: profile.stepPermissionOverrides }
       : {}),
-  }])) as Record<string, { default_permission_mode: string; movement_permission_overrides?: Record<string, string> }>;
+  }])) as Record<string, { default_permission_mode: string; step_permission_overrides?: Record<string, string> }>;
 }
 
-export function normalizePieceOverrides(
+export function normalizeWorkflowOverrides(
   raw: {
     quality_gates?: string[];
     quality_gates_edit_only?: boolean;
-    movements?: Record<string, { quality_gates?: string[] }>;
+    steps?: Record<string, { quality_gates?: string[] }>;
     personas?: Record<string, { quality_gates?: string[] }>;
   } | undefined,
-): PieceOverrides | undefined {
+): WorkflowOverrides | undefined {
   if (!raw) return undefined;
   return {
     qualityGates: raw.quality_gates,
     qualityGatesEditOnly: raw.quality_gates_edit_only,
-    movements: raw.movements
+    steps: raw.steps
       ? Object.fromEntries(
-          Object.entries(raw.movements).map(([name, override]) => [
-            name,
-            { qualityGates: override.quality_gates },
-          ])
-        )
+        Object.entries(raw.steps).map(([name, override]) => [
+          name,
+          { qualityGates: override.quality_gates },
+        ])
+      )
       : undefined,
     personas: raw.personas
       ? Object.fromEntries(
-          Object.entries(raw.personas).map(([name, override]) => [
-            name,
-            { qualityGates: override.quality_gates },
-          ])
-        )
+        Object.entries(raw.personas).map(([name, override]) => [
+          name,
+          { qualityGates: override.quality_gates },
+        ])
+      )
       : undefined,
   };
 }
 
-export function denormalizePieceOverrides(
-  overrides: PieceOverrides | undefined,
+export function denormalizeWorkflowOverrides(
+  overrides: WorkflowOverrides | undefined,
 ): {
   quality_gates?: string[];
   quality_gates_edit_only?: boolean;
-  movements?: Record<string, { quality_gates?: string[] }>;
+  steps?: Record<string, { quality_gates?: string[] }>;
   personas?: Record<string, { quality_gates?: string[] }>;
 } | undefined {
   if (!overrides) return undefined;
   const result: {
     quality_gates?: string[];
     quality_gates_edit_only?: boolean;
-    movements?: Record<string, { quality_gates?: string[] }>;
+    steps?: Record<string, { quality_gates?: string[] }>;
     personas?: Record<string, { quality_gates?: string[] }>;
   } = {};
   if (overrides.qualityGates !== undefined) {
@@ -98,14 +104,14 @@ export function denormalizePieceOverrides(
   if (overrides.qualityGatesEditOnly !== undefined) {
     result.quality_gates_edit_only = overrides.qualityGatesEditOnly;
   }
-  if (overrides.movements) {
-    result.movements = Object.fromEntries(
-      Object.entries(overrides.movements).map(([name, override]) => {
-        const movementOverride: { quality_gates?: string[] } = {};
+  if (overrides.steps) {
+    result.steps = Object.fromEntries(
+      Object.entries(overrides.steps).map(([name, override]) => {
+        const stepOverride: { quality_gates?: string[] } = {};
         if (override.qualityGates !== undefined) {
-          movementOverride.quality_gates = override.qualityGates;
+          stepOverride.quality_gates = override.qualityGates;
         }
-        return [name, movementOverride];
+        return [name, stepOverride];
       })
     );
   }
@@ -235,15 +241,25 @@ export function buildRawTaktProvidersOrThrow(
 }
 
 export function denormalizeProviderOptions(
-  providerOptions: MovementProviderOptions | undefined,
+  providerOptions: StepProviderOptions | undefined,
 ): Record<string, unknown> | undefined {
   if (!providerOptions) {
     return undefined;
   }
 
   const raw: Record<string, unknown> = {};
-  if (providerOptions.codex?.networkAccess !== undefined) {
-    raw.codex = { network_access: providerOptions.codex.networkAccess };
+  if (
+    providerOptions.codex?.networkAccess !== undefined
+    || providerOptions.codex?.reasoningEffort !== undefined
+  ) {
+    raw.codex = {
+      ...(providerOptions.codex.networkAccess !== undefined
+        ? { network_access: providerOptions.codex.networkAccess }
+        : {}),
+      ...(providerOptions.codex.reasoningEffort !== undefined
+        ? { reasoning_effort: providerOptions.codex.reasoningEffort }
+        : {}),
+    };
   }
   if (providerOptions.opencode?.networkAccess !== undefined) {
     raw.opencode = { network_access: providerOptions.opencode.networkAccess };
@@ -252,6 +268,9 @@ export function denormalizeProviderOptions(
     const claude: Record<string, unknown> = {};
     if (providerOptions.claude.allowedTools !== undefined) {
       claude.allowed_tools = providerOptions.claude.allowedTools;
+    }
+    if (providerOptions.claude.effort !== undefined) {
+      claude.effort = providerOptions.claude.effort;
     }
     const sandbox: Record<string, unknown> = {};
     if (providerOptions.claude.sandbox?.allowUnsandboxedCommands !== undefined) {

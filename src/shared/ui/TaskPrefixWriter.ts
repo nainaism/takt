@@ -6,7 +6,7 @@
  * This class wraps process.stdout.write with line buffering and a colored
  * `[taskName]` prefix on every non-empty line.
  *
- * Design mirrors ParallelLogger (movement-level) but targets task-level output:
+ * Design mirrors ParallelLogger (step-level) but targets task-level output:
  * - Regular log lines (info, header, status) get the prefix
  * - Stream output gets line-buffered then prefixed
  * - Empty lines are passed through without prefix
@@ -31,11 +31,11 @@ export interface TaskPrefixWriterOptions {
   writeFn?: (text: string) => void;
 }
 
-export interface MovementPrefixContext {
-  movementName: string;
+export interface StepPrefixContext {
+  stepName: string;
   iteration: number;
-  maxMovements: number;
-  movementIteration: number;
+  maxSteps: number;
+  stepIteration: number;
 }
 
 /**
@@ -48,7 +48,7 @@ export interface MovementPrefixContext {
 export class TaskPrefixWriter {
   private readonly taskPrefix: string;
   private readonly writeFn: (text: string) => void;
-  private movementContext: MovementPrefixContext | undefined;
+  private stepContext: StepPrefixContext | undefined;
   private lineBuffer = '';
 
   constructor(options: TaskPrefixWriterOptions) {
@@ -59,24 +59,25 @@ export class TaskPrefixWriter {
     this.writeFn = options.writeFn ?? ((text: string) => process.stdout.write(text));
   }
 
-  setMovementContext(context: MovementPrefixContext): void {
-    this.movementContext = context;
+  setStepContext(context: StepPrefixContext): void {
+    this.stepContext = context;
   }
 
   private buildPrefix(): string {
-    if (!this.movementContext) {
+    if (!this.stepContext) {
       return `${this.taskPrefix} `;
     }
 
-    const { movementName, iteration, maxMovements, movementIteration } = this.movementContext;
-    return `${this.taskPrefix}[${movementName}](${iteration}/${maxMovements})(${movementIteration}) `;
+    const { stepName, iteration, maxSteps, stepIteration } = this.stepContext;
+    return `${this.taskPrefix}[${stepName}](${iteration}/${maxSteps})(${stepIteration}) `;
   }
 
   /**
    * Write a complete line with prefix.
    * Multi-line text is split and each non-empty line gets the prefix.
+   * Optional style function is applied after ANSI stripping.
    */
-  writeLine(text: string): void {
+  writeLine(text: string, style?: (cleaned: string) => string): void {
     const cleaned = stripAnsi(text);
     const lines = cleaned.split('\n');
 
@@ -84,7 +85,8 @@ export class TaskPrefixWriter {
       if (line === '') {
         this.writeFn('\n');
       } else {
-        this.writeFn(`${this.buildPrefix()}${line}\n`);
+        const output = style ? style(line) : line;
+        this.writeFn(`${this.buildPrefix()}${output}\n`);
       }
     }
   }
@@ -92,8 +94,9 @@ export class TaskPrefixWriter {
   /**
    * Write a chunk of streaming text with line buffering.
    * Partial lines are buffered until a newline arrives, then output with prefix.
+   * Optional style function is applied after ANSI stripping.
    */
-  writeChunk(text: string): void {
+  writeChunk(text: string, style?: (cleaned: string) => string): void {
     const cleaned = stripAnsi(text);
     const combined = this.lineBuffer + cleaned;
     const parts = combined.split('\n');
@@ -105,7 +108,8 @@ export class TaskPrefixWriter {
       if (line === '') {
         this.writeFn('\n');
       } else {
-        this.writeFn(`${this.buildPrefix()}${line}\n`);
+        const output = style ? style(line) : line;
+        this.writeFn(`${this.buildPrefix()}${output}\n`);
       }
     }
   }

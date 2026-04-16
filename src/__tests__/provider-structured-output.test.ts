@@ -20,8 +20,6 @@ const {
 vi.mock('../infra/claude/client.js', () => ({
   callClaude: mockCallClaude,
   callClaudeCustom: mockCallClaudeCustom,
-  callClaudeAgent: vi.fn(),
-  callClaudeSkill: vi.fn(),
 }));
 
 // ===== Codex =====
@@ -52,6 +50,20 @@ vi.mock('../infra/opencode/index.js', () => ({
   callOpenCodeCustom: mockCallOpenCodeCustom,
 }));
 
+// ===== Mock =====
+const {
+  mockCallMock,
+  mockCallMockCustom,
+} = vi.hoisted(() => ({
+  mockCallMock: vi.fn(),
+  mockCallMockCustom: vi.fn(),
+}));
+
+vi.mock('../infra/mock/index.js', () => ({
+  callMock: mockCallMock,
+  callMockCustom: mockCallMockCustom,
+}));
+
 // ===== Config (API key resolvers + CLI path resolvers) =====
 vi.mock('../infra/config/index.js', () => ({
   resolveAnthropicApiKey: vi.fn(() => undefined),
@@ -70,6 +82,7 @@ vi.mock('node:child_process', () => ({
 import { ClaudeProvider } from '../infra/providers/claude.js';
 import { CodexProvider } from '../infra/providers/codex.js';
 import { OpenCodeProvider } from '../infra/providers/opencode.js';
+import { MockProvider } from '../infra/providers/mock.js';
 
 const SCHEMA = {
   type: 'object',
@@ -94,6 +107,11 @@ describe('ClaudeProvider — structured output', () => {
     vi.clearAllMocks();
   });
 
+  it('supportsStructuredOutput is true', () => {
+    const provider = new ClaudeProvider() as { supportsStructuredOutput?: boolean };
+    expect(provider.supportsStructuredOutput).toBe(true);
+  });
+
   it('outputSchema を callClaude に渡し structuredOutput を返す', async () => {
     mockCallClaude.mockResolvedValue(doneResponse('coder', { step: 2 }));
 
@@ -103,6 +121,19 @@ describe('ClaudeProvider — structured output', () => {
     const opts = mockCallClaude.mock.calls[0]?.[2];
     expect(opts).toHaveProperty('outputSchema', SCHEMA);
     expect(result.structuredOutput).toEqual({ step: 2 });
+  });
+
+  it('provider_options.claude.effort を callClaude に渡す', async () => {
+    mockCallClaude.mockResolvedValue(doneResponse('coder'));
+
+    const agent = new ClaudeProvider().setup({ name: 'coder' });
+    await agent.call('prompt', {
+      cwd: '/tmp',
+      providerOptions: { claude: { effort: 'medium' } },
+    });
+
+    const opts = mockCallClaude.mock.calls[0]?.[2];
+    expect(opts).toHaveProperty('effort', 'medium');
   });
 
   it('systemPrompt 指定時も outputSchema が callClaudeCustom に渡される', async () => {
@@ -143,6 +174,11 @@ describe('CodexProvider — structured output', () => {
     vi.clearAllMocks();
   });
 
+  it('supportsStructuredOutput is true', () => {
+    const provider = new CodexProvider() as { supportsStructuredOutput?: boolean };
+    expect(provider.supportsStructuredOutput).toBe(true);
+  });
+
   it('outputSchema を callCodex に渡し structuredOutput を返す', async () => {
     mockCallCodex.mockResolvedValue(doneResponse('coder', { step: 2 }));
 
@@ -153,6 +189,19 @@ describe('CodexProvider — structured output', () => {
     expect(opts).toHaveProperty('outputSchema', SCHEMA);
     expect(opts).toHaveProperty('codexPathOverride', '/opt/codex/bin/codex');
     expect(result.structuredOutput).toEqual({ step: 2 });
+  });
+
+  it('provider_options.codex.reasoningEffort を callCodex に渡す', async () => {
+    mockCallCodex.mockResolvedValue(doneResponse('coder'));
+
+    const agent = new CodexProvider().setup({ name: 'coder' });
+    await agent.call('prompt', {
+      cwd: '/tmp',
+      providerOptions: { codex: { reasoningEffort: 'high' } },
+    });
+
+    const opts = mockCallCodex.mock.calls[0]?.[2];
+    expect(opts).toHaveProperty('reasoningEffort', 'high');
   });
 
   it('systemPrompt 指定時も outputSchema が callCodexCustom に渡される', async () => {
@@ -191,6 +240,11 @@ describe('CodexProvider — structured output', () => {
 describe('OpenCodeProvider — structured output', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('supportsStructuredOutput is true', () => {
+    const provider = new OpenCodeProvider() as { supportsStructuredOutput?: boolean };
+    expect(provider.supportsStructuredOutput).toBe(true);
   });
 
   it('outputSchema を callOpenCode に渡し structuredOutput を返す', async () => {
@@ -244,5 +298,34 @@ describe('OpenCodeProvider — structured output', () => {
 
     const opts = mockCallOpenCode.mock.calls[0]?.[2];
     expect(opts.outputSchema).toBeUndefined();
+  });
+});
+
+// ---------- Mock ----------
+
+describe('MockProvider — structured output', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('supportsStructuredOutput is true', () => {
+    const provider = new MockProvider() as { supportsStructuredOutput?: boolean };
+    expect(provider.supportsStructuredOutput).toBe(true);
+  });
+
+  it('passes allowedTools through to the mock client', async () => {
+    mockCallMock.mockResolvedValue(doneResponse('coder'));
+
+    const agent = new MockProvider().setup({ name: 'coder' });
+    await agent.call('prompt', {
+      cwd: '/tmp',
+      allowedTools: ['Read', 'Edit'],
+      outputSchema: SCHEMA,
+    });
+
+    const opts = mockCallMock.mock.calls[0]?.[2];
+    expect(opts).toMatchObject({
+      allowedTools: ['Read', 'Edit'],
+    });
   });
 });

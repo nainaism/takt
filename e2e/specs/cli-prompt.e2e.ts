@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createIsolatedEnv, type IsolatedEnv } from '../helpers/isolated-env';
 import { runTakt } from '../helpers/takt-runner';
 import { createLocalRepo, type LocalRepo } from '../helpers/test-repo';
+import { findDeprecatedTerms } from '../../test/helpers/deprecated-terminology.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,35 +24,38 @@ describe('E2E: Prompt preview command (takt prompt)', () => {
     try { isolatedEnv.cleanup(); } catch { /* best-effort */ }
   });
 
-  it('should output prompt preview header and movement info for a piece', () => {
-    // Given: a piece file path
-    const piecePath = resolve(__dirname, '../fixtures/pieces/mock-single-step.yaml');
+  it('should output workflow prompt preview header and step info for a workflow', () => {
+    // Given: a workflow file path
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-single-step.yaml');
 
-    // When: running takt prompt with piece path
+    // When: running takt prompt with workflow path
     const result = runTakt({
-      args: ['prompt', piecePath],
+      args: ['prompt', workflowPath],
       cwd: repo.path,
       env: isolatedEnv.env,
     });
 
-    // Then: output contains "Prompt Preview" header and movement info
-    // (may fail on Phase 3 for pieces with tag-based rules, but header is still output)
+    // Then: output contains workflow/step terminology
+    // (may fail on Phase 3 for workflows with tag-based rules, but header is still output)
     const combined = result.stdout + result.stderr;
-    expect(combined).toMatch(/Prompt Preview|Movement 1/i);
+    const normalized = combined.replace(/^- Working Directory: .*$/m, '');
+    expect(combined).toContain('Workflow Prompt Preview:');
+    expect(combined).toContain('Step 1:');
+    expect(findDeprecatedTerms(normalized)).toEqual([]);
   });
 
-  it('should report not found for a nonexistent piece name', () => {
-    // Given: a nonexistent piece name
+  it('should report not found for a nonexistent workflow name', () => {
+    // Given: a nonexistent workflow name
 
-    // When: running takt prompt with invalid piece
+    // When: running takt prompt with an invalid workflow
     const result = runTakt({
-      args: ['prompt', 'nonexistent-piece-xyz'],
+      args: ['prompt', 'nonexistent-workflow-xyz'],
       cwd: repo.path,
       env: isolatedEnv.env,
     });
 
-    // Then: reports piece not found
+    // Then: reports workflow not found
     const combined = result.stdout + result.stderr;
-    expect(combined).toMatch(/not found/i);
+    expect(combined).toContain('Workflow "nonexistent-workflow-xyz" not found.');
   });
 });

@@ -1,11 +1,12 @@
-import type { PhaseName } from '../../../core/piece/index.js';
-import type { JudgeStageEntry } from '../../../core/piece/types.js';
+import type { NdjsonWorkflowStackEntry } from '../../../shared/utils/index.js';
+import type { PhaseName } from '../../../core/workflow/index.js';
+import type { JudgeStageEntry } from '../../../core/workflow/types.js';
 
 export type TraceReportMode = 'off' | 'redacted' | 'full';
 
 export interface TraceReportParams {
   tracePath: string;
-  pieceName: string;
+  workflowName: string;
   task: string;
   runSlug: string;
   status: 'completed' | 'aborted';
@@ -29,10 +30,12 @@ export interface TracePhase {
   judgeStages?: JudgeStageEntry[];
 }
 
-export interface TraceMovement {
+export interface TraceStep {
   step: string;
   persona: string;
   iteration: number;
+  workflow?: string;
+  stack?: NdjsonWorkflowStackEntry[];
   instruction?: string;
   startedAt: string;
   completedAt?: string;

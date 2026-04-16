@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRunPaths } from '../core/piece/run/run-paths.js';
+import { buildRunPaths } from '../core/workflow/run/run-paths.js';
 
 describe('buildRunPaths', () => {
   it('should build run-scoped relative and absolute paths', () => {
@@ -15,5 +15,14 @@ describe('buildRunPaths', () => {
 
     expect(paths.reportsAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/reports');
     expect(paths.metaAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/meta.json');
+  });
+
+  it('should append namespace under reports and context paths for subworkflows', () => {
+    const paths = buildRunPaths('/tmp/project', '20260210-demo-task', ['subworkflows', 'delegate-coding']);
+
+    expect(paths.reportsRel).toBe('.takt/runs/20260210-demo-task/reports/subworkflows/delegate-coding');
+    expect(paths.contextRel).toBe('.takt/runs/20260210-demo-task/context/subworkflows/delegate-coding');
+    expect(paths.reportsAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/reports/subworkflows/delegate-coding');
+    expect(paths.contextKnowledgeAbs).toBe('/tmp/project/.takt/runs/20260210-demo-task/context/subworkflows/delegate-coding/knowledge');
   });
 });

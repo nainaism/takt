@@ -1,14 +1,11 @@
-/**
- * Shared provider-protocol types used across layers.
- *
- * Defined here (shared/) rather than core/piece/ so that modules in the
- * shared/ layer (StreamDisplay, providerEventLogger, etc.) can import them
- * without creating an upward shared → core dependency.
- *
- * core/piece/types.ts re-exports these for backward compatibility.
- */
-
-export type ProviderType = 'claude' | 'codex' | 'opencode' | 'cursor' | 'copilot' | 'mock';
+export type ProviderType =
+  | 'claude'
+  | 'claude-sdk'
+  | 'codex'
+  | 'opencode'
+  | 'cursor'
+  | 'copilot'
+  | 'mock';
 
 export interface StreamInitEventData {
   model: string;
@@ -51,6 +48,22 @@ export interface StreamErrorEventData {
   raw?: string;
 }
 
+export interface StreamAssistantErrorEventData {
+  error: string;
+  sessionId: string;
+}
+
+export interface StreamRateLimitEventData {
+  sessionId: string;
+  status: 'allowed' | 'allowed_warning' | 'rejected';
+  rateLimitType?: string;
+  overageStatus?: 'allowed' | 'allowed_warning' | 'rejected';
+  overageDisabledReason?: string;
+  resetsAt?: number;
+  overageResetsAt?: number;
+  isUsingOverage?: boolean;
+}
+
 export type StreamEvent =
   | { type: 'init'; data: StreamInitEventData }
   | { type: 'tool_use'; data: StreamToolUseEventData }
@@ -59,6 +72,8 @@ export type StreamEvent =
   | { type: 'text'; data: StreamTextEventData }
   | { type: 'thinking'; data: StreamThinkingEventData }
   | { type: 'result'; data: StreamResultEventData }
+  | { type: 'assistant_error'; data: StreamAssistantErrorEventData }
+  | { type: 'rate_limit'; data: StreamRateLimitEventData }
   | { type: 'error'; data: StreamErrorEventData };
 
 export type StreamCallback = (event: StreamEvent) => void;

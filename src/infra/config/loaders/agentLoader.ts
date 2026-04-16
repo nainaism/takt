@@ -3,42 +3,78 @@
  *
  * Loads persona prompts with user → builtin fallback:
  * 1. User personas: ~/.takt/personas/*.md
- * 2. Builtin personas: builtins/{lang}/personas/*.md
+ * 2. Builtin personas: builtins/{lang}/facets/personas/*.md
  */
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { CustomAgentConfig } from '../../../core/models/index.js';
 import {
+  getGlobalConfigDir,
+  getProjectConfigDir,
   getGlobalPersonasDir,
-  getGlobalPiecesDir,
   getBuiltinPersonasDir,
-  getBuiltinPiecesDir,
   getGlobalFacetDir,
   getProjectFacetDir,
   getRepertoireDir,
   isPathSafe,
 } from '../paths.js';
-import { getProjectConfigDirIfEnabled } from '../project/projectConfigGuards.js';
+import { getProjectConfigDirIfEnabled, isProjectConfigEnabled } from '../project/projectConfigGuards.js';
 import { resolveConfigValue } from '../resolveConfigValue.js';
 
 /** Get all allowed base directories for persona prompt files */
 function getAllowedPromptBases(cwd: string): string[] {
-  const lang = resolveConfigValue(cwd, 'language');
-  const allowedBases = [
-    getGlobalPersonasDir(),
-    getGlobalPiecesDir(),
-    getBuiltinPersonasDir(lang),
-    getBuiltinPiecesDir(lang),
-    getGlobalFacetDir('personas'),
-    getRepertoireDir(),
+  const lang = resolveConfigValue(cwd, 'language') ?? 'en';
+  const enabledProjectConfigDir = getProjectConfigDirIfEnabled(cwd);
+  const globalConfigDir = getGlobalConfigDir();
+  const bases: string[] = [
+    join(cwd, 'personas'),
+    join(cwd, 'agents'),
+    join(cwd, 'workflows'),
   ];
+  if (enabledProjectConfigDir) {
+    bases.push(
+      join(enabledProjectConfigDir, 'personas'),
+      join(enabledProjectConfigDir, 'agents'),
+      join(enabledProjectConfigDir, 'workflows'),
+      getProjectFacetDir(cwd, 'personas'),
+      join(enabledProjectConfigDir, 'repertoire'),
+    );
+  }
+  bases.push(
+    join(globalConfigDir, 'personas'),
+    join(globalConfigDir, 'agents'),
+    join(globalConfigDir, 'workflows'),
+    getRepertoireDir(),
+    getGlobalPersonasDir(),
+    getBuiltinPersonasDir(lang),
+    getGlobalFacetDir('personas'),
+  );
+  return bases;
+}
 
-  if (getProjectConfigDirIfEnabled(cwd)) {
-    allowedBases.push(getProjectFacetDir(cwd, 'personas'));
+export function validatePersonaPromptPath(personaPath: string, cwd: string): void {
+  // When the project config dir is disabled due to collision with the global
+  // config dir, reject paths that literally (without following symlinks) start
+  // with the project config dir path, so access via the colliding symlinked path
+  // is blocked even though it resolves to the same physical location as the global dir.
+  if (!isProjectConfigEnabled(cwd)) {
+    const projectConfigDir = resolve(getProjectConfigDir(cwd));
+    const normalizedPersonaPath = resolve(personaPath);
+    if (normalizedPersonaPath === projectConfigDir
+      || normalizedPersonaPath.startsWith(projectConfigDir + '/')) {
+      throw new Error(`Persona prompt file path is not allowed: ${personaPath}`);
+    }
   }
 
-  return allowedBases;
+  const isValid = getAllowedPromptBases(cwd).some((base) => isPathSafe(base, personaPath));
+  if (!isValid) {
+    throw new Error(`Persona prompt file path is not allowed: ${personaPath}`);
+  }
+
+  if (!existsSync(personaPath)) {
+    throw new Error(`Persona prompt file not found: ${personaPath}`);
+  }
 }
 
 /** Load agents from markdown files in a directory */
@@ -82,10 +118,7 @@ export function loadAgentPrompt(agent: CustomAgentConfig, cwd: string): string {
 
   if (agent.promptFile) {
     const promptFile = agent.promptFile;
-    const isValid = getAllowedPromptBases(cwd).some((base) => isPathSafe(base, promptFile));
-    if (!isValid) {
-      throw new Error(`Agent prompt file path is not allowed: ${agent.promptFile}`);
-    }
+    validatePersonaPromptPath(promptFile, cwd);
 
     if (!existsSync(agent.promptFile)) {
       throw new Error(`Agent prompt file not found: ${agent.promptFile}`);
@@ -99,14 +132,6 @@ export function loadAgentPrompt(agent: CustomAgentConfig, cwd: string): string {
 
 /** Load persona prompt from a resolved path. */
 export function loadPersonaPromptFromPath(personaPath: string, cwd: string): string {
-  const isValid = getAllowedPromptBases(cwd).some((base) => isPathSafe(base, personaPath));
-  if (!isValid) {
-    throw new Error(`Persona prompt file path is not allowed: ${personaPath}`);
-  }
-
-  if (!existsSync(personaPath)) {
-    throw new Error(`Persona prompt file not found: ${personaPath}`);
-  }
-
+  validatePersonaPromptPath(personaPath, cwd);
   return readFileSync(personaPath, 'utf-8');
 }

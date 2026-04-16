@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { runReportPhase, type PhaseRunnerContext } from '../core/piece/phase-runner.js';
-import type { PieceMovement } from '../core/models/types.js';
+import { runReportPhase, type PhaseRunnerContext } from '../core/workflow/phase-runner.js';
+import type { WorkflowStep } from '../core/models/types.js';
 import type { RunAgentOptions } from '../agents/runner.js';
 
 vi.mock('../agents/runner.js', () => ({
@@ -13,7 +13,7 @@ vi.mock('../agents/runner.js', () => ({
 import { runAgent } from '../agents/runner.js';
 import type { AgentResponse } from '../core/models/types.js';
 
-function createStep(fileName: string): PieceMovement {
+function createStep(fileName: string): WorkflowStep {
   return {
     name: 'reviewers',
     personaDisplayName: 'Reviewers',
@@ -185,5 +185,82 @@ describe('runReportPhase report history behavior', () => {
 
     // Then
     expect(capturedOverrides).toEqual([{ maxTurns: 3 }]);
+  });
+
+  it('should resume the next report file with the updated sessionId returned by the previous report file', async () => {
+    // Given
+    const reportDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'reports');
+    const step: WorkflowStep = {
+      name: 'reviewers',
+      personaDisplayName: 'Reviewers',
+      instruction: 'review',
+      passPreviousResponse: false,
+      outputContracts: [{ name: 'first.md' }, { name: 'second.md' }],
+    };
+    const resumedSessionIds: string[] = [];
+    const ctx = createContext(reportDir);
+    const originalBuildResumeOptions = ctx.buildResumeOptions;
+    ctx.buildResumeOptions = (step, sessionId, overrides) => {
+      resumedSessionIds.push(sessionId);
+      return originalBuildResumeOptions(step, sessionId, overrides);
+    };
+    queueRunAgentResponses([
+      {
+        persona: 'reviewers',
+        status: 'done',
+        content: 'first report',
+        timestamp: new Date('2026-02-10T06:21:17Z'),
+        sessionId: 'session-2',
+      },
+      {
+        persona: 'reviewers',
+        status: 'done',
+        content: 'second report',
+        timestamp: new Date('2026-02-10T06:22:17Z'),
+        sessionId: 'session-3',
+      },
+    ]);
+
+    // When
+    await runReportPhase(step, 1, ctx);
+
+    // Then
+    expect(resumedSessionIds).toEqual(['session-1', 'session-2']);
+  });
+
+  it('should resume report phase with an opaque claude headless sessionId', async () => {
+    // Given
+    const reportDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'reports');
+    const step = createStep('08-headless-review.md');
+    const resumedSessionIds: string[] = [];
+    const ctx = createContext(reportDir);
+    const originalBuildResumeOptions = ctx.buildResumeOptions;
+    ctx.buildResumeOptions = (step, sessionId, overrides) => {
+      resumedSessionIds.push(sessionId);
+      return originalBuildResumeOptions(step, sessionId, overrides);
+    };
+    queueRunAgentResponses([
+      {
+        persona: 'reviewers',
+        status: 'done',
+        content: 'Headless first report',
+        timestamp: new Date('2026-02-10T06:25:17Z'),
+        sessionId: 'claude-headless-session-token',
+      },
+      {
+        persona: 'reviewers',
+        status: 'done',
+        content: 'Headless second report',
+        timestamp: new Date('2026-02-10T06:26:17Z'),
+        sessionId: 'claude-headless-session-token-2',
+      },
+    ]);
+
+    // When
+    await runReportPhase(step, 1, ctx);
+    await runReportPhase(step, 2, ctx);
+
+    // Then
+    expect(resumedSessionIds).toEqual(['session-1', 'claude-headless-session-token']);
   });
 });

@@ -1,37 +1,29 @@
 /**
  * RunMeta — 実行メタデータの管理モジュール
  *
- * ランのメタデータ（task, piece, status, 開始・終了時刻など）を
+ * ランのメタデータ（task, workflow, status, 開始・終了時刻など）を
  * .takt/runs/{slug}/meta.json へ書き出す責務を担う。
  */
 
 import { writeFileAtomic, ensureDir } from '../../../infra/config/index.js';
-import type { RunPaths } from '../../../core/piece/run/run-paths.js';
+import type { RunMeta } from '../../../core/workflow/run/run-meta.js';
+import type { RunPaths } from '../../../core/workflow/run/run-paths.js';
+import type { WorkflowResumePoint } from '../../../core/models/index.js';
 
-interface RunMeta {
-  task: string;
-  piece: string;
-  runSlug: string;
-  runRoot: string;
-  reportDirectory: string;
-  contextDirectory: string;
-  logsDirectory: string;
-  status: 'running' | 'completed' | 'aborted';
-  startTime: string;
-  endTime?: string;
-  iterations?: number;
-}
+type PersistedRunMeta = Omit<RunMeta, 'resumePoint'> & {
+  resume_point?: WorkflowResumePoint;
+};
 
 export class RunMetaManager {
   private readonly runMeta: RunMeta;
   private readonly metaAbs: string;
   private finalized = false;
 
-  constructor(runPaths: RunPaths, task: string, pieceName: string) {
+  constructor(runPaths: RunPaths, task: string, workflowName: string) {
     this.metaAbs = runPaths.metaAbs;
     this.runMeta = {
       task,
-      piece: pieceName,
+      workflow: workflowName,
       runSlug: runPaths.slug,
       runRoot: runPaths.runRootRel,
       reportDirectory: runPaths.reportsRel,
@@ -41,20 +33,41 @@ export class RunMetaManager {
       startTime: new Date().toISOString(),
     };
     ensureDir(runPaths.runRootAbs);
-    writeFileAtomic(this.metaAbs, JSON.stringify(this.runMeta, null, 2));
+    this.writeRunMeta(this.runMeta);
+  }
+
+  updateStep(stepName: string, iteration: number, resumePoint?: WorkflowResumePoint): void {
+    this.runMeta.currentStep = stepName;
+    this.runMeta.currentIteration = iteration;
+    this.runMeta.resumePoint = resumePoint;
+    this.writeRunMeta(this.runMeta);
+  }
+
+  updateResumePoint(resumePoint?: WorkflowResumePoint): void {
+    this.runMeta.resumePoint = resumePoint;
+    this.writeRunMeta(this.runMeta);
   }
 
   finalize(status: 'completed' | 'aborted', iterations?: number): void {
-    writeFileAtomic(this.metaAbs, JSON.stringify({
+    this.writeRunMeta({
       ...this.runMeta,
       status,
       endTime: new Date().toISOString(),
       ...(iterations != null ? { iterations } : {}),
-    } satisfies RunMeta, null, 2));
+    } satisfies RunMeta);
     this.finalized = true;
   }
 
   get isFinalized(): boolean {
     return this.finalized;
+  }
+
+  private writeRunMeta(meta: RunMeta): void {
+    const serialized: PersistedRunMeta = {
+      ...meta,
+      ...(meta.resumePoint ? { resume_point: meta.resumePoint } : {}),
+    };
+    delete (serialized as Partial<RunMeta>).resumePoint;
+    writeFileAtomic(this.metaAbs, JSON.stringify(serialized, null, 2));
   }
 }

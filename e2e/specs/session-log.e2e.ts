@@ -5,6 +5,7 @@ import { createIsolatedEnv, type IsolatedEnv } from '../helpers/isolated-env';
 import { runTakt } from '../helpers/takt-runner';
 import { createLocalRepo, type LocalRepo } from '../helpers/test-repo';
 import { readSessionRecords } from '../helpers/session-log';
+import { findDeprecatedTerms } from '../../test/helpers/deprecated-terminology.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,14 +25,14 @@ describe('E2E: Session NDJSON log output (mock)', () => {
     try { isolatedEnv.cleanup(); } catch { /* best-effort */ }
   });
 
-  it('should write piece_start, step_complete, and piece_complete on success', () => {
-    const piecePath = resolve(__dirname, '../fixtures/pieces/mock-single-step.yaml');
+  it('should write workflow_start, step_complete, and workflow_complete on success', () => {
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-single-step.yaml');
     const scenarioPath = resolve(__dirname, '../fixtures/scenarios/execute-done.json');
 
     const result = runTakt({
       args: [
         '--task', 'Test session log success',
-        '--piece', piecePath,
+        '--workflow', workflowPath,
         '--provider', 'mock',
       ],
       cwd: repo.path,
@@ -45,19 +46,20 @@ describe('E2E: Session NDJSON log output (mock)', () => {
     expect(result.exitCode).toBe(0);
 
     const records = readSessionRecords(repo.path);
-    expect(records.some((r) => r.type === 'piece_start')).toBe(true);
+    expect(records.some((r) => r.type === 'workflow_start')).toBe(true);
     expect(records.some((r) => r.type === 'step_complete')).toBe(true);
-    expect(records.some((r) => r.type === 'piece_complete')).toBe(true);
+    expect(records.some((r) => r.type === 'workflow_complete')).toBe(true);
+    expect(findDeprecatedTerms(records.map((record) => record.type).join('\n'))).toEqual([]);
   }, 240_000);
 
-  it('should write piece_abort with reason on failure', () => {
-    const piecePath = resolve(__dirname, '../fixtures/pieces/mock-no-match.yaml');
+  it('should write workflow_abort with reason on failure', () => {
+    const workflowPath = resolve(__dirname, '../fixtures/workflows/mock-no-match.yaml');
     const scenarioPath = resolve(__dirname, '../fixtures/scenarios/no-match.json');
 
     const result = runTakt({
       args: [
         '--task', 'Test session log abort',
-        '--piece', piecePath,
+        '--workflow', workflowPath,
         '--provider', 'mock',
       ],
       cwd: repo.path,
@@ -71,9 +73,10 @@ describe('E2E: Session NDJSON log output (mock)', () => {
     expect(result.exitCode).not.toBe(0);
 
     const records = readSessionRecords(repo.path);
-    const abortRecord = records.find((r) => r.type === 'piece_abort');
+    const abortRecord = records.find((r) => r.type === 'workflow_abort');
     expect(abortRecord).toBeDefined();
     expect(typeof abortRecord?.reason).toBe('string');
     expect((abortRecord?.reason as string).length).toBeGreaterThan(0);
+    expect(findDeprecatedTerms(records.map((record) => record.type).join('\n'))).toEqual([]);
   }, 240_000);
 });

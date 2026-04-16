@@ -52,7 +52,7 @@ vi.mock('../infra/git/index.js', () => ({
 
 vi.mock('../features/tasks/index.js', () => ({
   selectAndExecuteTask: vi.fn(),
-  determinePiece: vi.fn(),
+  determineWorkflow: vi.fn(),
   saveTaskFromInteractive: vi.fn(),
   createIssueAndSaveTask: vi.fn(),
   promptLabelSelection: vi.fn().mockResolvedValue([]),
@@ -88,9 +88,9 @@ vi.mock('../infra/task/index.js', () => ({
 }));
 
 vi.mock('../infra/config/index.js', () => ({
-  getPieceDescription: vi.fn(() => ({ name: 'default', description: 'test piece', pieceStructure: '', movementPreviews: [] })),
-  resolveConfigValue: vi.fn((_: string, key: string) => (key === 'piece' ? 'default' : false)),
-  resolveConfigValues: vi.fn(() => ({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' })),
+  getWorkflowDescription: vi.fn(() => ({ name: 'default', description: 'test workflow', workflowStructure: '', stepPreviews: [] })),
+  resolveConfigValue: vi.fn((_: string, key: string) => (key === 'workflow' ? 'default' : false)),
+  resolveConfigValues: vi.fn(() => ({ language: 'en', interactivePreviewSteps: 3, provider: 'claude' })),
   loadPersonaSessions: vi.fn(() => ({})),
 }));
 
@@ -100,7 +100,7 @@ vi.mock('../features/interactive/assistantConfig.js', () => ({
 
 vi.mock('../shared/constants.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  DEFAULT_PIECE_NAME: 'default',
+  DEFAULT_WORKFLOW_NAME: 'default',
 }));
 
 const mockOpts: Record<string, unknown> = {};
@@ -121,10 +121,11 @@ vi.mock('../app/cli/program.js', () => {
 vi.mock('../app/cli/helpers.js', () => ({
   resolveAgentOverrides: (...args: unknown[]) => mockResolveAgentOverrides(...args),
   isDirectTask: vi.fn(() => false),
+  resolveWorkflowCliOption: vi.fn((opts: Record<string, unknown>) => typeof opts.workflow === 'string' ? opts.workflow : undefined),
 }));
 
 import { formatIssueAsTask, parseIssueNumbers } from '../infra/git/index.js';
-import { selectAndExecuteTask, determinePiece, createIssueAndSaveTask } from '../features/tasks/index.js';
+import { selectAndExecuteTask, determineWorkflow, createIssueAndSaveTask } from '../features/tasks/index.js';
 import { interactiveMode } from '../features/interactive/index.js';
 import { resolveConfigValues, loadPersonaSessions } from '../infra/config/index.js';
 import { isDirectTask } from '../app/cli/helpers.js';
@@ -135,7 +136,7 @@ import type { Issue } from '../infra/git/index.js';
 const mockFormatIssueAsTask = vi.mocked(formatIssueAsTask);
 const mockParseIssueNumbers = vi.mocked(parseIssueNumbers);
 const mockSelectAndExecuteTask = vi.mocked(selectAndExecuteTask);
-const mockDeterminePiece = vi.mocked(determinePiece);
+const mockDetermineWorkflow = vi.mocked(determineWorkflow);
 const mockCreateIssueAndSaveTask = vi.mocked(createIssueAndSaveTask);
 const mockInteractiveMode = vi.mocked(interactiveMode);
 const mockLoadPersonaSessions = vi.mocked(loadPersonaSessions);
@@ -162,7 +163,7 @@ beforeEach(() => {
     delete mockOpts[key];
   }
   // Default setup
-  mockDeterminePiece.mockResolvedValue('default');
+  mockDetermineWorkflow.mockResolvedValue('default');
   mockInteractiveMode.mockResolvedValue({ action: 'execute', task: 'summarized task' });
   mockIsDirectTask.mockReturnValue(false);
   mockResolveAgentOverrides.mockReturnValue(undefined);
@@ -223,6 +224,25 @@ describe('Issue resolution in routing', () => {
 
 
   describe('--issue option', () => {
+    it('should pass --workflow to determineWorkflow and selectAndExecuteTask', async () => {
+      mockOpts.workflow = 'migration-workflow';
+      mockDetermineWorkflow.mockResolvedValue('migration-workflow');
+
+      await executeDefaultAction();
+
+      expect(mockDetermineWorkflow).toHaveBeenCalledWith('/test/cwd', 'migration-workflow');
+      expect(mockSelectAndExecuteTask).toHaveBeenCalledWith(
+        '/test/cwd',
+        'summarized task',
+        expect.objectContaining({
+          workflow: 'migration-workflow',
+          interactiveUserInput: true,
+          skipTaskList: true,
+        }),
+        undefined,
+      );
+    });
+
     it('should resolve issue and pass to interactive mode when --issue is specified', async () => {
       // Given
       mockOpts.issue = 131;
@@ -235,7 +255,7 @@ describe('Issue resolution in routing', () => {
       await executeDefaultAction();
 
       // Then: issue should be fetched
-      expect(mockFetchIssue).toHaveBeenCalledWith(131);
+      expect(mockFetchIssue).toHaveBeenCalledWith(131, undefined);
 
       // Then: interactive mode should receive the formatted issue as initial input
       expect(mockInteractiveMode).toHaveBeenCalledWith(
@@ -352,7 +372,7 @@ describe('Issue resolution in routing', () => {
   });
 
   describe('task history injection', () => {
-    it('should include failed/completed/interrupted tasks in pieceContext for interactive mode', async () => {
+    it('should include failed/completed/interrupted tasks in workflow context for interactive mode', async () => {
       const failedTask = {
         kind: 'failed' as const,
         name: 'failed-task',
@@ -546,7 +566,7 @@ describe('Issue resolution in routing', () => {
     it('should load saved session and pass to interactiveMode when --continue is specified', async () => {
       // Given
       mockOpts.continue = true;
-      mockResolveConfigValues.mockReturnValue({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' });
+      mockResolveConfigValues.mockReturnValue({ language: 'en', interactivePreviewSteps: 3, provider: 'claude' });
       mockResolveAssistantConfigLayers.mockReturnValue({ local: { provider: 'claude' }, global: {} });
       mockLoadPersonaSessions.mockReturnValue({ interactive: 'saved-session-123' });
 
@@ -571,7 +591,7 @@ describe('Issue resolution in routing', () => {
       mockOpts.continue = true;
       mockResolveConfigValues.mockReturnValue({
         language: 'en',
-        interactivePreviewMovements: 3,
+        interactivePreviewSteps: 3,
         provider: 'claude',
       });
       mockResolveAssistantConfigLayers.mockReturnValue({
@@ -609,7 +629,7 @@ describe('Issue resolution in routing', () => {
       mockResolveAgentOverrides.mockReturnValue({ provider: 'opencode', model: 'cli-model' });
       mockResolveConfigValues.mockReturnValue({
         language: 'en',
-        interactivePreviewMovements: 3,
+        interactivePreviewSteps: 3,
         provider: 'claude',
       });
       mockResolveAssistantConfigLayers.mockReturnValue({
@@ -646,7 +666,7 @@ describe('Issue resolution in routing', () => {
       mockOpts.continue = true;
       mockResolveConfigValues.mockReturnValue({
         language: 'en',
-        interactivePreviewMovements: 3,
+        interactivePreviewSteps: 3,
         provider: 'mock',
         model: 'global-top-level-model',
       });
@@ -693,7 +713,7 @@ describe('Issue resolution in routing', () => {
     it('should show message and start new session when --continue has no saved session', async () => {
       // Given
       mockOpts.continue = true;
-      mockResolveConfigValues.mockReturnValue({ language: 'en', interactivePreviewMovements: 3, provider: 'claude' });
+      mockResolveConfigValues.mockReturnValue({ language: 'en', interactivePreviewSteps: 3, provider: 'claude' });
       mockResolveAssistantConfigLayers.mockReturnValue({ local: { provider: 'claude' }, global: {} });
       mockLoadPersonaSessions.mockReturnValue({});
 

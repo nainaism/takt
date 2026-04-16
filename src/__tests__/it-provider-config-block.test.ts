@@ -8,15 +8,7 @@ vi.mock('../agents/runner.js', () => ({
   runAgent: vi.fn(),
 }));
 
-vi.mock('../agents/ai-judge.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../agents/ai-judge.js')>();
-  return {
-    ...original,
-    callAiJudge: vi.fn().mockResolvedValue(-1),
-  };
-});
-
-vi.mock('../core/piece/phase-runner.js', () => ({
+vi.mock('../core/workflow/phase-runner.js', () => ({
   needsStatusJudgmentPhase: vi.fn().mockReturnValue(false),
   runReportPhase: vi.fn().mockResolvedValue(undefined),
   runStatusJudgmentPhase: vi.fn().mockResolvedValue({ tag: '', ruleIndex: 0, method: 'auto_select' }),
@@ -39,21 +31,21 @@ interface TestEnv {
   globalDir: string;
 }
 
-function createEnv(pieceBody: string): TestEnv {
+function createEnv(workflowBody: string): TestEnv {
   const root = join(tmpdir(), `takt-it-provider-block-${randomUUID()}`);
   const projectDir = join(root, 'project');
   const globalDir = join(root, 'global');
 
   mkdirSync(projectDir, { recursive: true });
-  mkdirSync(join(projectDir, '.takt', 'pieces', 'personas'), { recursive: true });
+  mkdirSync(join(projectDir, '.takt', 'workflows', 'personas'), { recursive: true });
   mkdirSync(globalDir, { recursive: true });
 
   writeFileSync(
-    join(projectDir, '.takt', 'pieces', 'provider-block-it.yaml'),
-    pieceBody,
+    join(projectDir, '.takt', 'workflows', 'provider-block-it.yaml'),
+    workflowBody,
     'utf-8',
   );
-  writeFileSync(join(projectDir, '.takt', 'pieces', 'personas', 'planner.md'), 'You are planner.', 'utf-8');
+  writeFileSync(join(projectDir, '.takt', 'workflows', 'personas', 'planner.md'), 'You are planner.', 'utf-8');
 
   return { projectDir, globalDir };
 }
@@ -104,14 +96,14 @@ describe('IT: provider block reflection', () => {
     }
   });
 
-  it('movement provider block should be normalized and passed to runAgent options', async () => {
+  it('step provider block should override global/project provider options when origin is local', async () => {
     // Given
     env = createEnv([
       'name: provider-block-it',
-      'description: movement provider block integration test',
-      'max_movements: 3',
-      'initial_movement: plan',
-      'movements:',
+      'description: step provider block integration test',
+      'max_steps: 3',
+      'initial_step: plan',
+      'steps:',
       '  - name: plan',
       '    persona: ./personas/planner.md',
       '    provider:',
@@ -143,32 +135,32 @@ describe('IT: provider block reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'provider-block-it',
+      workflowIdentifier: 'provider-block-it',
     });
 
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBe('codex');
-    expect(options?.stepModel).toBe('gpt-5.3');
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('gpt-5.3');
     expect(options?.providerOptions).toEqual({
-      codex: { networkAccess: true },
+      codex: { networkAccess: false },
     });
   });
 
-  it('piece_config provider block should be inherited by movement without provider', async () => {
+  it('workflow_config provider block should be inherited by step without provider', async () => {
     // Given
     env = createEnv([
       'name: provider-block-it',
-      'description: piece_config provider block integration test',
-      'max_movements: 3',
-      'initial_movement: plan',
-      'piece_config:',
+      'description: workflow_config provider block integration test',
+      'max_steps: 3',
+      'initial_step: plan',
+      'workflow_config:',
       '  provider:',
       '    type: codex',
-      '    model: piece-model',
+      '    model: workflow-model',
       '    network_access: true',
-      'movements:',
+      'steps:',
       '  - name: plan',
       '    persona: ./personas/planner.md',
       '    instruction: "{task}"',
@@ -185,27 +177,27 @@ describe('IT: provider block reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'provider-block-it',
+      workflowIdentifier: 'provider-block-it',
     });
 
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBe('codex');
-    expect(options?.stepModel).toBe('piece-model');
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('workflow-model');
     expect(options?.providerOptions).toEqual({
       codex: { networkAccess: true },
     });
   });
 
-  it('project provider block should provide providerOptions when movement and piece_config do not specify provider', async () => {
+  it('project provider block should provide providerOptions when step and workflow_config do not specify provider', async () => {
     // Given
     env = createEnv([
       'name: provider-block-it',
       'description: project provider block integration test',
-      'max_movements: 3',
-      'initial_movement: plan',
-      'movements:',
+      'max_steps: 3',
+      'initial_step: plan',
+      'steps:',
       '  - name: plan',
       '    persona: ./personas/planner.md',
       '    instruction: "{task}"',
@@ -228,16 +220,64 @@ describe('IT: provider block reflection', () => {
       task: 'test task',
       cwd: env.projectDir,
       projectCwd: env.projectDir,
-      pieceIdentifier: 'provider-block-it',
+      workflowIdentifier: 'provider-block-it',
     });
 
     // Then
     expect(ok).toBe(true);
     const options = vi.mocked(runAgent).mock.calls[0]?.[2];
-    expect(options?.stepProvider).toBeUndefined();
-    expect(options?.stepModel).toBeUndefined();
+    expect(options?.resolvedProvider).toBe('codex');
+    expect(options?.resolvedModel).toBe('project-model');
     expect(options?.providerOptions).toEqual({
       codex: { networkAccess: false },
+    });
+  });
+
+  it('project claude provider block sandbox should reach runAgent providerOptions', async () => {
+    env = createEnv([
+      'name: provider-block-it',
+      'description: project claude sandbox provider block integration test',
+      'max_steps: 3',
+      'initial_step: plan',
+      'steps:',
+      '  - name: plan',
+      '    persona: ./personas/planner.md',
+      '    instruction: "{task}"',
+      '    rules:',
+      '      - condition: done',
+      '        next: COMPLETE',
+    ].join('\n'));
+    process.env.TAKT_CONFIG_DIR = env.globalDir;
+    setGlobalConfig(env.globalDir, 'provider: codex');
+    setProjectConfig(env.projectDir, [
+      'provider:',
+      '  type: claude',
+      '  model: sonnet',
+      '  sandbox:',
+      '    allow_unsandboxed_commands: true',
+      '    excluded_commands:',
+      '      - ./gradlew',
+    ].join('\n'));
+    invalidateGlobalConfigCache();
+
+    const ok = await executeTask({
+      task: 'test task',
+      cwd: env.projectDir,
+      projectCwd: env.projectDir,
+      workflowIdentifier: 'provider-block-it',
+    });
+
+    expect(ok).toBe(true);
+    const options = vi.mocked(runAgent).mock.calls[0]?.[2];
+    expect(options?.resolvedProvider).toBe('claude');
+    expect(options?.resolvedModel).toBe('sonnet');
+    expect(options?.providerOptions).toEqual({
+      claude: {
+        sandbox: {
+          allowUnsandboxedCommands: true,
+          excludedCommands: ['./gradlew'],
+        },
+      },
     });
   });
 });

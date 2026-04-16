@@ -43,12 +43,15 @@ program
 program
   .option('-i, --issue <number>', 'Issue number (equivalent to #N)', (val: string) => parseInt(val, 10))
   .option('--pr <number>', 'PR number to fetch review comments and fix', (val: string) => parseInt(val, 10))
-  .option('-w, --piece <name>', 'Piece name or path to piece file')
+  .option('-w, --workflow <name>', 'Workflow name or path to workflow file')
   .option('-b, --branch <name>', 'Branch name (auto-generated if omitted)')
   .option('--auto-pr', 'Create PR after successful execution')
   .option('--draft', 'Create PR as draft (requires --auto-pr or auto_pr config)')
   .option('--repo <owner/repo>', 'Repository (defaults to current)')
-  .option('--provider <name>', 'Override agent provider (claude|codex|opencode|cursor|copilot|mock)')
+  .option(
+    '--provider <name>',
+    'Override agent provider (claude-sdk|claude|codex|opencode|cursor|copilot|mock)',
+  )
   .option('--model <name>', 'Override agent model')
   .option('-t, --task <string>', 'Task content (as alternative to issue reference)')
   .option('--pipeline', 'Pipeline mode: non-interactive, no worktree, direct branch creation')
@@ -71,9 +74,8 @@ export async function runPreActionHook(): Promise<void> {
   initGitProvider(resolvedCwd);
 
   const verbose = isVerboseMode(resolvedCwd);
-  initDebugLogger(verbose ? { enabled: true } : undefined, resolvedCwd);
-
   const config = resolveConfigValues(resolvedCwd, ['logging', 'minimalOutput']);
+  initDebugLogger(verbose ? { enabled: true, trace: config.logging?.trace } : undefined, resolvedCwd);
 
   if (verbose) {
     setVerboseConsole(true);

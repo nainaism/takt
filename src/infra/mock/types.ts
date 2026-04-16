@@ -8,8 +8,10 @@ import type { Status } from '../../core/models/status.js';
 /** Options for mock calls */
 export interface MockCallOptions {
   cwd: string;
+  abortSignal?: AbortSignal;
   sessionId?: string;
   onStream?: StreamCallback;
+  allowedTools?: string[];
   /** Fixed response content (optional, defaults to generic mock response) */
   mockResponse?: string;
   /** Fixed status to return (optional, defaults to 'done') */
@@ -28,4 +30,6 @@ export interface ScenarioEntry {
   content: string;
   /** Optional structured output payload (for outputSchema-driven flows) */
   structuredOutput?: Record<string, unknown>;
+  /** Artificial delay in ms before returning (respects abortSignal) */
+  delayMs?: number;
 }

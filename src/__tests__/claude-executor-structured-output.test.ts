@@ -7,17 +7,24 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { delimiter, dirname } from 'node:path';
 
 // ===== SdkOptionsBuilder tests (no mock needed) =====
 
 import { buildSdkOptions } from '../infra/claude/options-builder.js';
 
 describe('SdkOptionsBuilder — outputFormat 変換', () => {
+  it('effort が SDK options に直接反映される', () => {
+    const sdkOptions = buildSdkOptions({ cwd: '/tmp', effort: 'medium' });
+
+    expect(sdkOptions.effort).toBe('medium');
+  });
+
   it('outputSchema が outputFormat に変換される', () => {
     const schema = { type: 'object', properties: { step: { type: 'integer' } } };
     const sdkOptions = buildSdkOptions({ cwd: '/tmp', outputSchema: schema });
 
-    expect((sdkOptions as Record<string, unknown>).outputFormat).toEqual({
+    expect(sdkOptions.outputFormat).toEqual({
       type: 'json_schema',
       schema,
     });
@@ -26,6 +33,34 @@ describe('SdkOptionsBuilder — outputFormat 変換', () => {
   it('outputSchema 未設定なら outputFormat は含まれない', () => {
     const sdkOptions = buildSdkOptions({ cwd: '/tmp' });
     expect(sdkOptions).not.toHaveProperty('outputFormat');
+  });
+
+  it('現在の Node.js 実行ディレクトリを PATH の先頭に追加する', () => {
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = ['/usr/bin', '/bin'].join(delimiter);
+
+      const sdkOptions = buildSdkOptions({
+        cwd: '/tmp',
+        pathToClaudeCodeExecutable: '/tmp/test-bin/claude',
+      });
+
+      const pathEntries = sdkOptions.env?.PATH?.split(delimiter) ?? [];
+      expect(pathEntries[0]).toBe(dirname(process.execPath));
+      expect(pathEntries).toContain('/usr/bin');
+      expect(pathEntries).toContain(dirname(process.execPath));
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
+  it('Anthropic API key を env に引き継ぐ', () => {
+    const sdkOptions = buildSdkOptions({
+      cwd: '/tmp',
+      anthropicApiKey: 'test-key',
+    });
+
+    expect(sdkOptions.env?.ANTHROPIC_API_KEY).toBe('test-key');
   });
 });
 

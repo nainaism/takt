@@ -5,12 +5,11 @@
  * following the same pattern as the Cursor provider.
  */
 
-import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentResponse } from '../../core/models/index.js';
-import { createLogger, getErrorMessage } from '../../shared/utils/index.js';
+import { createLogger, crossSpawn, getErrorMessage } from '../../shared/utils/index.js';
 import type { CopilotCallOptions } from './types.js';
 
 const log = createLogger('copilot-client');
@@ -67,6 +66,10 @@ function buildArgs(prompt: string, options: CopilotCallOptions & { shareFilePath
 
   if (options.model) {
     args.push('--model', options.model);
+  }
+
+  if (options.effort) {
+    args.push('--effort', options.effort);
   }
 
   if (options.sessionId) {
@@ -126,7 +129,7 @@ function createExecError(
 
 function execCopilot(args: string[], options: CopilotCallOptions): Promise<CopilotExecResult> {
   return new Promise<CopilotExecResult>((resolve, reject) => {
-    const child = spawn(options.copilotCliPath ?? COPILOT_COMMAND, args, {
+    const child = crossSpawn(options.copilotCliPath ?? COPILOT_COMMAND, args, {
       cwd: options.cwd,
       env: buildEnv(options.copilotGithubToken),
       stdio: ['ignore', 'pipe', 'pipe'],

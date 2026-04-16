@@ -5,8 +5,9 @@
  * and formats them for injection into the interactive system prompt.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { Dirent, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { readRunMetaBySlug } from '../../core/workflow/run/run-meta.js';
 import {
   PROVIDER_EVENTS_LOG_FILE_SUFFIX,
   USAGE_EVENTS_LOG_FILE_SUFFIX,
@@ -17,24 +18,28 @@ import type { SessionLog } from '../../shared/utils/index.js';
 /** Maximum number of runs to return from listing */
 const MAX_RUNS = 10;
 
-/** Maximum character length for movement log content */
+/** Maximum character length for step log content */
 const MAX_CONTENT_LENGTH = 500;
 
 /** Summary of a run for selection UI */
 export interface RunSummary {
   readonly slug: string;
   readonly task: string;
-  readonly piece: string;
+  readonly workflow: string;
   readonly status: string;
   readonly startTime: string;
 }
 
-/** A single movement log entry for display */
-interface MovementLogEntry {
+/** A single step log entry for display */
+type SessionHistoryEntry = SessionLog['history'][number];
+
+interface StepLogEntry {
   readonly step: string;
   readonly persona: string;
   readonly status: string;
   readonly content: string;
+  readonly workflow?: SessionHistoryEntry['workflow'];
+  readonly stack?: SessionHistoryEntry['stack'];
 }
 
 /** A report file entry */
@@ -46,9 +51,9 @@ interface ReportEntry {
 /** Full context loaded from a run for prompt injection */
 export interface RunSessionContext {
   readonly task: string;
-  readonly piece: string;
+  readonly workflow: string;
   readonly status: string;
-  readonly movementLogs: readonly MovementLogEntry[];
+  readonly stepLogs: readonly StepLogEntry[];
   readonly reports: readonly ReportEntry[];
 }
 
@@ -58,16 +63,6 @@ export interface RunPaths {
   readonly reportsDir: string;
 }
 
-interface MetaJson {
-  readonly task: string;
-  readonly piece: string;
-  readonly status: string;
-  readonly startTime: string;
-  readonly logsDirectory: string;
-  readonly reportDirectory: string;
-  readonly runSlug: string;
-}
-
 function truncateContent(content: string, maxLength: number): string {
   if (content.length <= maxLength) {
     return content;
@@ -75,28 +70,63 @@ function truncateContent(content: string, maxLength: number): string {
   return content.slice(0, maxLength) + '…';
 }
 
-function parseMetaJson(metaPath: string): MetaJson | null {
-  if (!existsSync(metaPath)) {
-    return null;
-  }
-  const raw = readFileSync(metaPath, 'utf-8').trim();
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as MetaJson;
-  } catch {
-    return null;
-  }
-}
-
-function buildMovementLogs(sessionLog: SessionLog): MovementLogEntry[] {
+function buildStepLogs(sessionLog: SessionLog): StepLogEntry[] {
   return sessionLog.history.map((entry) => ({
     step: entry.step,
     persona: entry.persona,
     status: entry.status,
     content: truncateContent(entry.content, MAX_CONTENT_LENGTH),
+    workflow: entry.workflow,
+    stack: entry.stack,
   }));
+}
+
+function formatStepScopeEntry(
+  entry: NonNullable<StepLogEntry['stack']>[number],
+): string {
+  const kindSuffix = entry.kind === 'workflow_call' ? ' [workflow_call]' : '';
+  return `${entry.workflow}/${entry.step}${kindSuffix}`;
+}
+
+function formatStepScope(log: StepLogEntry): string {
+  if (log.stack && log.stack.length > 0) {
+    return log.stack.map((entry) => formatStepScopeEntry(entry)).join(' -> ');
+  }
+
+  if (log.workflow) {
+    return `${log.workflow}/${log.step}`;
+  }
+
+  return log.step;
+}
+
+function collectReportFiles(rootDir: string, currentDir: string): ReportEntry[] {
+  const entries = readdirSync(currentDir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const reports: ReportEntry[] = [];
+  for (const entry of entries) {
+    const fullPath = join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      reports.push(...collectReportFiles(rootDir, fullPath));
+      continue;
+    }
+
+    if (!isMarkdownReport(entry)) {
+      continue;
+    }
+
+    reports.push({
+      filename: relative(rootDir, fullPath),
+      content: readFileSync(fullPath, 'utf-8'),
+    });
+  }
+
+  return reports;
+}
+
+function isMarkdownReport(entry: Dirent): boolean {
+  return entry.isFile() && entry.name.endsWith('.md');
 }
 
 function loadReports(reportsDir: string): ReportEntry[] {
@@ -104,11 +134,7 @@ function loadReports(reportsDir: string): ReportEntry[] {
     return [];
   }
 
-  const files = readdirSync(reportsDir).filter((f) => f.endsWith('.md')).sort();
-  return files.map((filename) => ({
-    filename,
-    content: readFileSync(join(reportsDir, filename), 'utf-8'),
-  }));
+  return collectReportFiles(reportsDir, reportsDir);
 }
 
 function findSessionLogFile(logsDir: string): string | null {
@@ -147,14 +173,13 @@ export function listRecentRuns(cwd: string): RunSummary[] {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const metaPath = join(runsDir, entry.name, 'meta.json');
-    const meta = parseMetaJson(metaPath);
+    const meta = readRunMetaBySlug(cwd, entry.name);
     if (!meta) continue;
 
     summaries.push({
       slug: entry.name,
       task: meta.task,
-      piece: meta.piece,
+      workflow: meta.workflow,
       status: meta.status,
       startTime: meta.startTime,
     });
@@ -179,8 +204,7 @@ export function findRunForTask(cwd: string, taskContent: string): string | null 
  * Get absolute paths to a run's logs and reports directories.
  */
 export function getRunPaths(cwd: string, slug: string): RunPaths {
-  const metaPath = join(cwd, '.takt', 'runs', slug, 'meta.json');
-  const meta = parseMetaJson(metaPath);
+  const meta = readRunMetaBySlug(cwd, slug);
   if (!meta) {
     throw new Error(`Run not found: ${slug}`);
   }
@@ -195,8 +219,7 @@ export function getRunPaths(cwd: string, slug: string): RunPaths {
  * Load full run session context for prompt injection.
  */
 export function loadRunSessionContext(cwd: string, slug: string): RunSessionContext {
-  const metaPath = join(cwd, '.takt', 'runs', slug, 'meta.json');
-  const meta = parseMetaJson(metaPath);
+  const meta = readRunMetaBySlug(cwd, slug);
   if (!meta) {
     throw new Error(`Run not found: ${slug}`);
   }
@@ -204,11 +227,11 @@ export function loadRunSessionContext(cwd: string, slug: string): RunSessionCont
   const logsDir = join(cwd, meta.logsDirectory);
   const logFile = findSessionLogFile(logsDir);
 
-  let movementLogs: MovementLogEntry[] = [];
+  let stepLogs: StepLogEntry[] = [];
   if (logFile) {
     const sessionLog = loadNdjsonLog(logFile);
     if (sessionLog) {
-      movementLogs = buildMovementLogs(sessionLog);
+      stepLogs = buildStepLogs(sessionLog);
     }
   }
 
@@ -217,9 +240,9 @@ export function loadRunSessionContext(cwd: string, slug: string): RunSessionCont
 
   return {
     task: meta.task,
-    piece: meta.piece,
+    workflow: meta.workflow,
     status: meta.status,
-    movementLogs,
+    stepLogs,
     reports,
   };
 }
@@ -251,13 +274,13 @@ export function loadPreviousOrderContent(cwd: string, taskContent: string): stri
  */
 export function formatRunSessionForPrompt(ctx: RunSessionContext): {
   runTask: string;
-  runPiece: string;
+  runWorkflow: string;
   runStatus: string;
-  runMovementLogs: string;
+  runStepLogs: string;
   runReports: string;
 } {
-  const logLines = ctx.movementLogs.map((log) => {
-    const header = `### ${log.step} (${log.persona}) — ${log.status}`;
+  const logLines = ctx.stepLogs.map((log) => {
+    const header = `### ${formatStepScope(log)} (${log.persona}) — ${log.status}`;
     return `${header}\n${log.content}`;
   });
 
@@ -267,9 +290,9 @@ export function formatRunSessionForPrompt(ctx: RunSessionContext): {
 
   return {
     runTask: ctx.task,
-    runPiece: ctx.piece,
+    runWorkflow: ctx.workflow,
     runStatus: ctx.status,
-    runMovementLogs: logLines.join('\n\n'),
+    runStepLogs: logLines.join('\n\n'),
     runReports: reportLines.join('\n\n'),
   };
 }

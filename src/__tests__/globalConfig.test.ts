@@ -1,15 +1,25 @@
 /**
  * Global config tests.
  *
- * Tests global config loading and saving with piece_overrides,
+ * Tests global config loading and saving with workflow_overrides,
  * including empty array round-trip behavior.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import type { GlobalConfig } from '../core/models/config-types.js';
+import {
+  unexpectedEnableBuiltinWorkflowsConfigKey,
+  unexpectedNotificationWorkflowAbortConfigKey,
+  unexpectedNotificationWorkflowCompleteConfigKey,
+  unexpectedWorkflowArpeggioConfigKey,
+  unexpectedWorkflowCategoriesFileConfigKey,
+  unexpectedWorkflowMcpServersConfigKey,
+  unexpectedWorkflowOverridesConfigKey,
+  unexpectedWorkflowRuntimePrepareConfigKey,
+} from '../../test/helpers/unknown-contract-test-keys.js';
 
 // Mock the getGlobalConfigPath to use a test directory
 let testConfigPath: string;
@@ -39,11 +49,11 @@ describe('globalConfig', () => {
     }
   });
 
-  describe('piece_overrides empty array round-trip', () => {
+  describe('workflow_overrides empty array round-trip', () => {
     it('should preserve empty quality_gates array in save/load cycle', () => {
       // Write config with empty quality_gates array
       const configContent = `
-piece_overrides:
+workflow_overrides:
   quality_gates: []
 `;
       writeFileSync(testConfigPath, configContent, 'utf-8');
@@ -51,7 +61,7 @@ piece_overrides:
       // Load config
       const manager = GlobalConfigManager.getInstance();
       const loaded = manager.load();
-      expect(loaded.pieceOverrides?.qualityGates).toEqual([]);
+      expect(loaded.workflowOverrides?.qualityGates).toEqual([]);
 
       // Save config
       manager.save(loaded);
@@ -60,13 +70,13 @@ piece_overrides:
       GlobalConfigManager.resetInstance();
       const reloadedManager = GlobalConfigManager.getInstance();
       const reloaded = reloadedManager.load();
-      expect(reloaded.pieceOverrides?.qualityGates).toEqual([]);
+      expect(reloaded.workflowOverrides?.qualityGates).toEqual([]);
     });
 
-    it('should preserve empty quality_gates in movements', () => {
+    it('should preserve empty quality_gates in steps', () => {
       const configContent = `
-piece_overrides:
-  movements:
+workflow_overrides:
+  steps:
     implement:
       quality_gates: []
 `;
@@ -74,36 +84,36 @@ piece_overrides:
 
       const manager = GlobalConfigManager.getInstance();
       const loaded = manager.load();
-      expect(loaded.pieceOverrides?.movements?.implement?.qualityGates).toEqual([]);
+      expect(loaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
 
       manager.save(loaded);
 
       GlobalConfigManager.resetInstance();
       const reloadedManager = GlobalConfigManager.getInstance();
       const reloaded = reloadedManager.load();
-      expect(reloaded.pieceOverrides?.movements?.implement?.qualityGates).toEqual([]);
+      expect(reloaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
     });
 
     it('should distinguish undefined from empty array', () => {
       // Test with undefined (not specified)
-      writeFileSync(testConfigPath, 'piece_overrides: {}\n', 'utf-8');
+      writeFileSync(testConfigPath, 'workflow_overrides: {}\n', 'utf-8');
 
       const manager1 = GlobalConfigManager.getInstance();
       const loaded1 = manager1.load();
-      expect(loaded1.pieceOverrides?.qualityGates).toBeUndefined();
+      expect(loaded1.workflowOverrides?.qualityGates).toBeUndefined();
 
       // Test with empty array (explicitly disabled)
       GlobalConfigManager.resetInstance();
-      writeFileSync(testConfigPath, 'piece_overrides:\n  quality_gates: []\n', 'utf-8');
+      writeFileSync(testConfigPath, 'workflow_overrides:\n  quality_gates: []\n', 'utf-8');
 
       const manager2 = GlobalConfigManager.getInstance();
       const loaded2 = manager2.load();
-      expect(loaded2.pieceOverrides?.qualityGates).toEqual([]);
+      expect(loaded2.workflowOverrides?.qualityGates).toEqual([]);
     });
 
     it('should preserve non-empty quality_gates array', () => {
       const config: GlobalConfig = {
-        pieceOverrides: {
+        workflowOverrides: {
           qualityGates: ['Test 1', 'Test 2'],
         },
       };
@@ -115,12 +125,12 @@ piece_overrides:
       const reloadedManager = GlobalConfigManager.getInstance();
       const reloaded = reloadedManager.load();
 
-      expect(reloaded.pieceOverrides?.qualityGates).toEqual(['Test 1', 'Test 2']);
+      expect(reloaded.workflowOverrides?.qualityGates).toEqual(['Test 1', 'Test 2']);
     });
 
     it('should preserve personas quality_gates in save/load cycle', () => {
       const configContent = `
-piece_overrides:
+workflow_overrides:
   personas:
     coder:
       quality_gates:
@@ -130,25 +140,25 @@ piece_overrides:
 
       const manager = GlobalConfigManager.getInstance();
       const loaded = manager.load();
-      const loadedPieceOverrides = loaded.pieceOverrides as unknown as {
+      const loadedWorkflowOverrides = loaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(loadedPieceOverrides.personas?.coder?.qualityGates).toEqual(['Global persona gate']);
+      expect(loadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual(['Global persona gate']);
 
       manager.save(loaded);
 
       GlobalConfigManager.resetInstance();
       const reloadedManager = GlobalConfigManager.getInstance();
       const reloaded = reloadedManager.load();
-      const reloadedPieceOverrides = reloaded.pieceOverrides as unknown as {
+      const reloadedWorkflowOverrides = reloaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(reloadedPieceOverrides.personas?.coder?.qualityGates).toEqual(['Global persona gate']);
+      expect(reloadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual(['Global persona gate']);
     });
 
     it('should preserve empty quality_gates array in personas', () => {
       const configContent = `
-piece_overrides:
+workflow_overrides:
   personas:
     coder:
       quality_gates: []
@@ -157,20 +167,88 @@ piece_overrides:
 
       const manager = GlobalConfigManager.getInstance();
       const loaded = manager.load();
-      const loadedPieceOverrides = loaded.pieceOverrides as unknown as {
+      const loadedWorkflowOverrides = loaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(loadedPieceOverrides.personas?.coder?.qualityGates).toEqual([]);
+      expect(loadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual([]);
 
       manager.save(loaded);
 
       GlobalConfigManager.resetInstance();
       const reloadedManager = GlobalConfigManager.getInstance();
       const reloaded = reloadedManager.load();
-      const reloadedPieceOverrides = reloaded.pieceOverrides as unknown as {
+      const reloadedWorkflowOverrides = reloaded.workflowOverrides as unknown as {
         personas?: Record<string, { qualityGates?: string[] }>;
       };
-      expect(reloadedPieceOverrides.personas?.coder?.qualityGates).toEqual([]);
+      expect(reloadedWorkflowOverrides.personas?.coder?.qualityGates).toEqual([]);
+    });
+
+    it('should load workflow_overrides.steps with canonical step keys', () => {
+      const configContent = `
+workflow_overrides:
+  steps:
+    implement:
+      quality_gates: []
+`;
+      writeFileSync(testConfigPath, configContent, 'utf-8');
+
+      const manager = GlobalConfigManager.getInstance();
+      const loaded = manager.load();
+
+      expect(loaded.workflowOverrides?.steps?.implement?.qualityGates).toEqual([]);
+    });
+
+    it('should reject an unexpected override key when workflow_overrides is also present', () => {
+      const configContent = `
+workflow_overrides:
+  quality_gates:
+    - "new"
+unexpected_overrides:
+  quality_gates:
+    - "ignored"
+`;
+      writeFileSync(testConfigPath, configContent, 'utf-8');
+
+      const manager = GlobalConfigManager.getInstance();
+      expect(() => manager.load()).toThrow(/unexpected_overrides/i);
+    });
+
+    it('should reject an unexpected override key even when semantically identical to workflow_overrides', () => {
+      const configContent = `
+workflow_overrides:
+  steps:
+    implement:
+      quality_gates:
+        - "shared"
+unexpected_overrides:
+  steps:
+    implement:
+      quality_gates:
+        - "shared"
+`;
+      writeFileSync(testConfigPath, configContent, 'utf-8');
+
+      const manager = GlobalConfigManager.getInstance();
+      expect(() => manager.load()).toThrow(/unexpected_overrides/i);
+    });
+
+    it('should save workflowOverrides using workflow_overrides and steps keys', () => {
+      const config: GlobalConfig = {
+        workflowOverrides: {
+          steps: {
+            implement: {
+              qualityGates: ['Global gate'],
+            },
+          },
+        },
+      };
+
+      const manager = GlobalConfigManager.getInstance();
+      manager.save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_overrides:');
+      expect(saved).toContain('steps:');
     });
   });
 
@@ -194,7 +272,7 @@ logging:
     it.each([
       ['worktree_dir', 'worktreeDir'],
       ['bookmarks_file', 'bookmarksFile'],
-      ['piece_categories_file', 'pieceCategoriesFile'],
+      ['workflow_categories_file', 'workflowCategoriesFile'],
       ['codex_cli_path', 'codexCliPath'],
       ['claude_cli_path', 'claudeCliPath'],
       ['cursor_cli_path', 'cursorCliPath'],
@@ -225,6 +303,237 @@ logging:
       const loaded = GlobalConfigManager.getInstance().load();
 
       expect(loaded.worktreeDir).toBe(homedir());
+    });
+  });
+
+  describe('workflow-facing global aliases', () => {
+    it.each([
+      [
+        unexpectedWorkflowOverridesConfigKey,
+        [
+          `${unexpectedWorkflowOverridesConfigKey}:`,
+          '  quality_gates:',
+          '    - blocked',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowRuntimePrepareConfigKey,
+        [
+          `${unexpectedWorkflowRuntimePrepareConfigKey}:`,
+          '  custom_scripts: true',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowArpeggioConfigKey,
+        [
+          `${unexpectedWorkflowArpeggioConfigKey}:`,
+          '  custom_data_source_modules: true',
+          '  custom_merge_inline_js: false',
+          '  custom_merge_files: true',
+        ].join('\n'),
+      ],
+      [
+        unexpectedWorkflowMcpServersConfigKey,
+        [
+          `${unexpectedWorkflowMcpServersConfigKey}:`,
+          '  stdio: true',
+          '  http: false',
+          '  sse: true',
+        ].join('\n'),
+      ],
+      [unexpectedEnableBuiltinWorkflowsConfigKey, `${unexpectedEnableBuiltinWorkflowsConfigKey}: true`],
+      [
+        unexpectedWorkflowCategoriesFileConfigKey,
+        `${unexpectedWorkflowCategoriesFileConfigKey}: /tmp/removed-workflow-categories.yaml`,
+      ],
+    ])('should reject unknown workflow-facing key %s in global config yaml', (unknownKey, content) => {
+      writeFileSync(testConfigPath, `${content}\n`, 'utf-8');
+
+      expect(() => GlobalConfigManager.getInstance().load()).toThrow(new RegExp(`${unknownKey}|unrecognized`, 'i'));
+    });
+
+    it.each([
+      unexpectedNotificationWorkflowCompleteConfigKey,
+      unexpectedNotificationWorkflowAbortConfigKey,
+    ])('should reject unknown notification workflow key %s in global config yaml', (unknownKey) => {
+      writeFileSync(
+        testConfigPath,
+        ['notification_sound_events:', `  ${unknownKey}: true`].join('\n'),
+        'utf-8',
+      );
+
+      expect(() => GlobalConfigManager.getInstance().load()).toThrow(new RegExp(`${unknownKey}|unrecognized`, 'i'));
+    });
+
+    it.each([
+      [
+        'workflow_arpeggio with duplicate canonical keys',
+        ['workflow_arpeggio:', '  custom_merge_files: true', 'workflow_arpeggio:', '  custom_merge_files: false'],
+      ],
+      [
+        'workflow_mcp_servers with duplicate canonical keys',
+        ['workflow_mcp_servers:', '  http: true', 'workflow_mcp_servers:', '  http: false'],
+      ],
+      [
+        'notification workflow keys with legacy keys',
+        [
+          'notification_sound_events:',
+          '  workflow_complete: true',
+          '  workflow_complete: false',
+          '  workflow_abort: false',
+          '  workflow_abort: true',
+        ],
+      ],
+    ])('should fail fast when %s are duplicated', (_label, lines) => {
+      writeFileSync(testConfigPath, `${lines.join('\n')}\n`, 'utf-8');
+
+      expect(() => GlobalConfigManager.getInstance().load()).toThrow(/Map keys must be unique/i);
+    });
+
+    it('should load workflow_runtime_prepare policy block', () => {
+      writeFileSync(
+        testConfigPath,
+        ['workflow_runtime_prepare:', '  custom_scripts: true'].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = GlobalConfigManager.getInstance().load();
+
+      expect(loaded.workflowRuntimePrepare).toEqual({ customScripts: true });
+    });
+
+    it('should save workflowRuntimePrepare using workflow_runtime_prepare key', () => {
+      const config: GlobalConfig = {
+        workflowRuntimePrepare: { customScripts: true },
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_runtime_prepare:');
+    });
+
+    it('should load workflow_arpeggio policy block', () => {
+      writeFileSync(
+        testConfigPath,
+        [
+          'workflow_arpeggio:',
+          '  custom_data_source_modules: true',
+          '  custom_merge_inline_js: false',
+          '  custom_merge_files: true',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = GlobalConfigManager.getInstance().load();
+
+      expect(loaded.workflowArpeggio).toEqual({
+        customDataSourceModules: true,
+        customMergeInlineJs: false,
+        customMergeFiles: true,
+      });
+    });
+
+    it('should save workflowArpeggio using workflow_arpeggio key', () => {
+      const config: GlobalConfig = {
+        workflowArpeggio: {
+          customDataSourceModules: true,
+          customMergeInlineJs: true,
+          customMergeFiles: false,
+        },
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_arpeggio:');
+    });
+
+    it('should load workflow_mcp_servers config block', () => {
+      writeFileSync(
+        testConfigPath,
+        ['workflow_mcp_servers:', '  stdio: true', '  http: false', '  sse: true'].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = GlobalConfigManager.getInstance().load();
+
+      expect(loaded.workflowMcpServers).toEqual({ stdio: true, http: false, sse: true });
+    });
+
+    it('should save workflowMcpServers using workflow_mcp_servers key', () => {
+      const config: GlobalConfig = {
+        workflowMcpServers: { stdio: true, http: true, sse: false },
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_mcp_servers:');
+    });
+
+    it('should load enable_builtin_workflows from the canonical key', () => {
+      writeFileSync(testConfigPath, 'enable_builtin_workflows: true\n', 'utf-8');
+
+      const loaded = GlobalConfigManager.getInstance().load();
+
+      expect(loaded.enableBuiltinWorkflows).toBe(true);
+    });
+
+    it('should save enableBuiltinWorkflows using enable_builtin_workflows key', () => {
+      const config: GlobalConfig = {
+        enableBuiltinWorkflows: true,
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('enable_builtin_workflows: true');
+    });
+
+    it('should save workflowCategoriesFile using workflow_categories_file key', () => {
+      const config: GlobalConfig = {
+        workflowCategoriesFile: '/tmp/workflow-categories.yaml',
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_categories_file: /tmp/workflow-categories.yaml');
+    });
+
+    it('should load workflow notification keys with canonical workflow key names', () => {
+      writeFileSync(
+        testConfigPath,
+        [
+          'notification_sound_events:',
+          '  workflow_complete: true',
+          '  workflow_abort: false',
+        ].join('\n'),
+        'utf-8',
+      );
+
+      const loaded = GlobalConfigManager.getInstance().load();
+
+      expect(loaded.notificationSoundEvents).toEqual({
+        workflowComplete: true,
+        workflowAbort: false,
+      });
+    });
+
+    it('should save notificationSoundEvents using workflow notification keys', () => {
+      const config: GlobalConfig = {
+        notificationSoundEvents: {
+          workflowComplete: true,
+          workflowAbort: false,
+        },
+      };
+
+      GlobalConfigManager.getInstance().save(config);
+
+      const saved = readFileSync(testConfigPath, 'utf-8');
+      expect(saved).toContain('workflow_complete: true');
+      expect(saved).toContain('workflow_abort: false');
     });
   });
 });
