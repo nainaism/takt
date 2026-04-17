@@ -26,8 +26,8 @@ export type { CodexCallOptions } from './types.js';
 const log = createLogger('codex-sdk');
 const CODEX_STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const CODEX_STREAM_ABORTED_MESSAGE = 'Codex execution aborted';
+const CODEX_TIMEOUT_MAX_RETRIES = 2;
 const CODEX_RETRY_MAX_RETRIES = 8;
-const CODEX_RETRY_TOTAL_ATTEMPTS = CODEX_RETRY_MAX_RETRIES + 1;
 const CODEX_RETRY_BASE_DELAY_MS = 1000;
 const CODEX_RETRYABLE_ERROR_PATTERNS = [
   'stream disconnected before completion',
@@ -92,6 +92,10 @@ function extractProviderUsageFromTurnCompleted(event: CodexEvent): ProviderUsage
  */
 export class CodexClient {
   private isRetriableError(message: string, aborted: boolean, abortCause?: 'timeout' | 'external'): boolean {
+    if (abortCause === 'timeout') {
+      return true;
+    }
+
     if (aborted || abortCause) {
       return false;
     }
@@ -149,8 +153,11 @@ export class CodexClient {
     const fullPrompt = options.systemPrompt
       ? `${options.systemPrompt}\n\n${prompt}`
       : prompt;
+    let standardRetryCount = 0;
+    let timeoutRetryCount = 0;
 
-    for (let attempt = 1; attempt <= CODEX_RETRY_TOTAL_ATTEMPTS; attempt++) {
+    while (true) {
+      const attempt = standardRetryCount + timeoutRetryCount + 1;
       const codexClientOptions = {
         ...(options.openaiApiKey ? { apiKey: options.openaiApiKey } : {}),
         ...(options.codexPathOverride ? { codexPathOverride: options.codexPathOverride } : {}),
@@ -166,6 +173,23 @@ export class CodexClient {
       const timeoutMessage = `Codex stream timed out after ${Math.floor(CODEX_STREAM_IDLE_TIMEOUT_MS / 60000)} minutes of inactivity`;
       let abortCause: 'timeout' | 'external' | undefined;
       let diagRef: StreamDiagnostics | undefined;
+      const shouldRetry = (message: string): boolean => {
+        if (!this.isRetriableError(message, streamAbortController.signal.aborted, abortCause)) {
+          return false;
+        }
+        if (abortCause === 'timeout') {
+          return timeoutRetryCount < CODEX_TIMEOUT_MAX_RETRIES;
+        }
+        return standardRetryCount < CODEX_RETRY_MAX_RETRIES;
+      };
+      const recordRetry = (): number => {
+        if (abortCause === 'timeout') {
+          timeoutRetryCount += 1;
+        } else {
+          standardRetryCount += 1;
+        }
+        return standardRetryCount + timeoutRetryCount;
+      };
 
       const resetIdleTimeout = (): void => {
         if (idleTimeoutId !== undefined) {
@@ -311,11 +335,11 @@ export class CodexClient {
 
         if (!success) {
           const message = failureMessage || 'Codex execution failed';
-          const retriable = this.isRetriableError(message, streamAbortController.signal.aborted, abortCause);
-          if (retriable && attempt <= CODEX_RETRY_MAX_RETRIES) {
+          if (shouldRetry(message)) {
             log.info('Retrying Codex call after transient failure', { agentType, attempt, message });
             threadId = currentThreadId;
-            await this.waitForRetryDelay(attempt, options.abortSignal);
+            const retryAttempt = recordRetry();
+            await this.waitForRetryDelay(retryAttempt, options.abortSignal);
             continue;
           }
 
@@ -359,11 +383,11 @@ export class CodexClient {
           errorMessage,
         );
 
-        const retriable = this.isRetriableError(errorMessage, streamAbortController.signal.aborted, abortCause);
-        if (retriable && attempt <= CODEX_RETRY_MAX_RETRIES) {
+        if (shouldRetry(errorMessage)) {
           log.info('Retrying Codex call after transient exception', { agentType, attempt, errorMessage });
           threadId = currentThreadId;
-          await this.waitForRetryDelay(attempt, options.abortSignal);
+          const retryAttempt = recordRetry();
+          await this.waitForRetryDelay(retryAttempt, options.abortSignal);
           continue;
         }
 

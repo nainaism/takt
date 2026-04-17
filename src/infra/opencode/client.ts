@@ -275,6 +275,10 @@ async function getFreePort(): Promise<number> {
  */
 export class OpenCodeClient {
   private isRetriableError(message: string, aborted: boolean, abortCause?: 'timeout' | 'external'): boolean {
+    if (abortCause === 'timeout') {
+      return true;
+    }
+
     if (aborted || abortCause) {
       return false;
     }
@@ -283,7 +287,10 @@ export class OpenCodeClient {
     return OPENCODE_RETRYABLE_ERROR_PATTERNS.some((pattern) => lower.includes(pattern));
   }
 
-  private async waitForRetryDelay(attempt: number, signal?: AbortSignal): Promise<void> {
+  private async waitForRetryDelay(
+    attempt: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const delayMs = OPENCODE_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attempt - 1));
     await new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {

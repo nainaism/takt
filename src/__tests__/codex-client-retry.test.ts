@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type MockEvent = Record<string, unknown>;
 type RunPlan =
   | { type: 'events'; events: MockEvent[] }
-  | { type: 'throw'; error: Error };
+  | { type: 'throw'; error: Error }
+  | { type: 'stream'; createEvents: (signal?: AbortSignal) => AsyncGenerator<MockEvent> };
 
 let runPlans: RunPlan[] = [];
 let runPlanIndex = 0;
 let startThreadCalls: Array<Record<string, unknown> | undefined> = [];
 let resumeThreadCalls: Array<{ threadId: string; options?: Record<string, unknown> }> = [];
+const CODEX_STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 function createEvents(events: MockEvent[]) {
   return (async function* () {
@@ -18,10 +20,37 @@ function createEvents(events: MockEvent[]) {
   })();
 }
 
+function waitForAbort(signal?: AbortSignal): Promise<never> {
+  return new Promise<never>((_, reject) => {
+    const onAbort = (): void => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('stream aborted'));
+    };
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function createIdleTimeoutPlan(onThreadStarted?: () => void): RunPlan {
+  return {
+    type: 'stream',
+    createEvents: (signal?: AbortSignal) => (async function* () {
+      yield { type: 'thread.started', thread_id: 'thread-1' };
+      onThreadStarted?.();
+      await waitForAbort(signal);
+    })(),
+  };
+}
+
 function createThread(id: string) {
   return {
     id,
-    runStreamed: async () => {
+    runStreamed: async (_prompt: string, turnOptions?: { signal?: AbortSignal }) => {
       const plan = runPlans[runPlanIndex];
       runPlanIndex += 1;
       if (!plan) {
@@ -29,6 +58,9 @@ function createThread(id: string) {
       }
       if (plan.type === 'throw') {
         throw plan.error;
+      }
+      if (plan.type === 'stream') {
+        return { events: plan.createEvents(turnOptions?.signal) };
       }
       return { events: createEvents(plan.events) };
     },
@@ -196,5 +228,146 @@ describe('CodexClient retry', () => {
     expect(elapsedMs).toBe(255000);
     expect(result.status).toBe('error');
     expect(result.content).toBe('Selected model is at capacity. Please try a different model.');
+  });
+
+  it('ストリームの idle timeout を 1 回 retry して成功を返す', async () => {
+    vi.useFakeTimers();
+
+    runPlans = [
+      createIdleTimeoutPlan(),
+      {
+        type: 'events',
+        events: [
+          { type: 'thread.started', thread_id: 'thread-1' },
+          { type: 'item.completed', item: { id: 'msg-timeout', type: 'agent_message', text: 'timeout retry succeeded' } },
+          { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+        ],
+      },
+    ];
+
+    const client = new CodexClient();
+    const resultPromise = client.call('coder', 'prompt', { cwd: '/tmp' });
+
+    await vi.advanceTimersByTimeAsync(CODEX_STREAM_IDLE_TIMEOUT_MS - 1);
+    expect(resumeThreadCalls).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resumeThreadCalls).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(resumeThreadCalls).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await resultPromise;
+
+    expect(startThreadCalls).toHaveLength(1);
+    expect(resumeThreadCalls).toEqual([
+      {
+        threadId: 'thread-1',
+        options: expect.objectContaining({ workingDirectory: '/tmp' }),
+      },
+    ]);
+    expect(result.status).toBe('done');
+    expect(result.content).toBe('timeout retry succeeded');
+  });
+
+  it('ストリームの idle timeout は最大 2 回まで retry して停止する', async () => {
+    vi.useFakeTimers();
+
+    runPlans = Array.from({ length: 3 }, () => createIdleTimeoutPlan());
+
+    const client = new CodexClient();
+    const resultPromise = client.call('coder', 'prompt', { cwd: '/tmp' });
+
+    await vi.advanceTimersByTimeAsync(CODEX_STREAM_IDLE_TIMEOUT_MS + 1000);
+    expect(resumeThreadCalls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(CODEX_STREAM_IDLE_TIMEOUT_MS + 2000);
+    expect(resumeThreadCalls).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(CODEX_STREAM_IDLE_TIMEOUT_MS);
+    const result = await resultPromise;
+
+    expect(startThreadCalls).toHaveLength(1);
+    expect(resumeThreadCalls).toHaveLength(2);
+    expect(result.status).toBe('error');
+    expect(result.content).toBe('Codex stream timed out after 10 minutes of inactivity');
+  });
+
+  it('通常 retry を 8 回使い切った後でも idle timeout を retry して成功を返す', async () => {
+    vi.useFakeTimers();
+
+    runPlans = [
+      ...Array.from({ length: 8 }, () => ({
+        type: 'events' as const,
+        events: [
+          { type: 'turn.failed', error: { message: 'Selected model is at capacity. Please try a different model.' } },
+        ],
+      })),
+      createIdleTimeoutPlan(),
+      {
+        type: 'events',
+        events: [
+          { type: 'thread.started', thread_id: 'thread-1' },
+          { type: 'item.completed', item: { id: 'msg-timeout-after-capacity', type: 'agent_message', text: 'mixed retry succeeded' } },
+          { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+        ],
+      },
+    ];
+
+    const client = new CodexClient();
+    const resultPromise = client.call('coder', 'prompt', { cwd: '/tmp' });
+
+    const transientRetryDelaysMs = [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000];
+    for (let index = 0; index < transientRetryDelaysMs.length; index += 1) {
+      await vi.advanceTimersByTimeAsync(transientRetryDelaysMs[index]);
+      expect(resumeThreadCalls).toHaveLength(index + 1);
+    }
+
+    await vi.advanceTimersByTimeAsync(CODEX_STREAM_IDLE_TIMEOUT_MS - 1);
+    expect(resumeThreadCalls).toHaveLength(8);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resumeThreadCalls).toHaveLength(8);
+
+    await vi.advanceTimersByTimeAsync(256000 - 1);
+    expect(resumeThreadCalls).toHaveLength(8);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await resultPromise;
+
+    expect(startThreadCalls).toHaveLength(1);
+    expect(resumeThreadCalls).toHaveLength(9);
+    expect(result.status).toBe('done');
+    expect(result.content).toBe('mixed retry succeeded');
+  });
+
+  it('external abort は retry せずに停止する', async () => {
+    let notifyStreamReady!: () => void;
+    const streamReady = new Promise<void>((resolve) => {
+      notifyStreamReady = resolve;
+    });
+
+    runPlans = [
+      createIdleTimeoutPlan(() => {
+        notifyStreamReady();
+      }),
+    ];
+
+    const controller = new AbortController();
+    const client = new CodexClient();
+    const resultPromise = client.call('coder', 'prompt', {
+      cwd: '/tmp',
+      abortSignal: controller.signal,
+    });
+
+    await streamReady;
+    controller.abort();
+    const result = await resultPromise;
+
+    expect(startThreadCalls).toHaveLength(1);
+    expect(resumeThreadCalls).toHaveLength(0);
+    expect(result.status).toBe('error');
+    expect(result.content).toBe('Codex execution aborted');
   });
 });
