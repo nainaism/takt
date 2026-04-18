@@ -10,6 +10,7 @@ const ALLOWED_TOOLS_PROVIDERS = new Set<ProviderType>([
   'claude',
   'claude-sdk',
   'opencode',
+  'hermes',
   'mock',
 ]);
 

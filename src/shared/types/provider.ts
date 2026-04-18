@@ -5,6 +5,7 @@ export type ProviderType =
   | 'opencode'
   | 'cursor'
   | 'copilot'
+  | 'hermes'
   | 'mock';
 
 export interface StreamInitEventData {

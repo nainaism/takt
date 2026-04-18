@@ -81,6 +81,7 @@ export const ProviderProfileNameSchema = z.enum([
   'opencode',
   'cursor',
   'copilot',
+  'hermes',
   'mock',
 ]);
 export const ProviderTypeSchema = ProviderProfileNameSchema;
