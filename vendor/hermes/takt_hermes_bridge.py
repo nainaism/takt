@@ -36,9 +36,14 @@ _agent_config = {}  # type: Dict[str, Any]
 
 
 def _resolve_venv_python() -> str:
-    """Find the Python executable inside hermes-agent's venv."""
-    hermes_home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    venv_python = os.path.join(hermes_home, "hermes-agent", "venv", "bin", "python3")
+    """Find the Python executable inside hermes-agent's venv.
+
+    hermes-agent is always installed at ~/.hermes/hermes-agent/,
+    regardless of profile. HERMES_HOME may point to a profile directory,
+    so we use a fixed path for the agent installation.
+    """
+    base_home = os.path.expanduser("~/.hermes")
+    venv_python = os.path.join(base_home, "hermes-agent", "venv", "bin", "python3")
     if os.path.isfile(venv_python):
         return venv_python
     # Fallback to current interpreter
@@ -46,9 +51,14 @@ def _resolve_venv_python() -> str:
 
 
 def _ensure_hermes_on_path() -> None:
-    """Add hermes-agent source and vendor/hermes to sys.path."""
-    hermes_home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
-    hermes_src = os.path.join(hermes_home, "hermes-agent")
+    """Add hermes-agent source and vendor/hermes to sys.path.
+
+    hermes-agent is always at ~/.hermes/hermes-agent/,
+    regardless of profile. HERMES_HOME controls the agent's
+    config/profile, not the installation location.
+    """
+    base_home = os.path.expanduser("~/.hermes")
+    hermes_src = os.path.join(base_home, "hermes-agent")
     if hermes_src not in sys.path:
         sys.path.insert(0, hermes_src)
 

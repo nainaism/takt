@@ -105,7 +105,7 @@ let _reqId = 0;
 
 function expandHome(path: string): string {
   if (path.startsWith('~')) {
-    return resolve(process.env.HOME ?? '/Users/nainai', path.slice(1));
+    return resolve(process.env.HOME ?? '/Users/nainai', path.slice(2) || '/');
   }
   return path;
 }
@@ -155,6 +155,7 @@ export class HermesBridge {
   private async _startProcess(): Promise<void> {
     const python = this.resolvePython();
     const script = this.resolveScript();
+    console.error(`[hermes-bridge] Spawning: ${python} ${script}`);
 
     this.process = spawn(python, [script], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -355,8 +356,11 @@ export class HermesBridge {
   }
 
   private resolvePython(): string {
-    const hermesHome = expandHome(process.env.HERMES_HOME ?? '~/.hermes');
-    const venvPython = resolve(hermesHome, 'hermes-agent', 'venv', 'bin', 'python3');
+    // hermes-agent is always installed at ~/.hermes/hermes-agent/,
+    // regardless of profile. HERMES_HOME may point to a profile directory,
+    // so we use a fixed path for the agent installation.
+    const baseHome = expandHome('~/.hermes');
+    const venvPython = resolve(baseHome, 'hermes-agent', 'venv', 'bin', 'python3');
     if (existsSync(venvPython)) return venvPython;
     return 'python3';
   }
