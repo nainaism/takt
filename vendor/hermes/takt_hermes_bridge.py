@@ -112,6 +112,11 @@ def handle_setup(params: Dict[str, Any]) -> Dict[str, Any]:
     logger.debug("handle_setup called with params: model=%s, provider=%s, name=%s, sessionId=%s",
                  params.get("model", "(empty)"), params.get("provider", "(empty)"),
                  params.get("name", "(empty)"), params.get("sessionId", "(empty)"))
+    # Skip agent creation if no model specified (initial empty setup from TAKT bridge)
+    # The real setup with model/provider will follow immediately
+    if not params.get("model") and not params.get("provider"):
+        logger.debug("Skipping empty setup — will wait for real setup call")
+        return {"status": "ok", "sessionId": None}
     _agent_config = params
     logger.debug("Creating AIAgent...")
     _agent = _create_agent(params)
