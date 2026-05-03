@@ -24,7 +24,7 @@ const DEFAULT_DISABLED_TOOLSETS = ['image_gen', 'tts', 'homeassistant'] as const
 const MAX_BUFFER_SIZE = 1024 * 1024;
 
 /** Request timeout for bridge calls (5 minutes for long agent conversations) */
-const REQUEST_TIMEOUT_MS = 300_000;
+const REQUEST_TIMEOUT_MS = 900_000;
 
 /** Grace period after sending shutdown before killing the process */
 const SHUTDOWN_GRACE_MS = 3_000;
