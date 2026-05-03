@@ -251,7 +251,7 @@ def main() -> None:
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-    logger.info("TAKT-Hermes bridge started (PID %d)", os.getpid())
+    logger.info("TAKT-Hermes bridge started (PID %d) cwd=%s TERMINAL_CWD=%s", os.getpid(), os.getcwd(), os.environ.get("TERMINAL_CWD", "(not set)"))
 
     # Signal ready
     _send_response({"id": 0, "result": {"status": "ready"}})
