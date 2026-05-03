@@ -255,6 +255,7 @@ export interface AgentWorkflowStep extends WorkflowStepBase {
   teamLeader?: TeamLeaderConfig;
   policyContents?: string[];
   knowledgeContents?: string[];
+  maxTurns?: number;
 }
 
 export interface SystemWorkflowStep extends WorkflowStepBase {

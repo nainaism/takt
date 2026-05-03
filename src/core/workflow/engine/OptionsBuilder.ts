@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { WorkflowStep, WorkflowState, Language } from '../../models/types.js';
-import type { StepProviderOptions } from '../../models/workflow-types.js';
+import type { StepProviderOptions, AgentWorkflowStep } from '../../models/workflow-types.js';
 import type { RunAgentOptions } from '../../../agents/runner.js';
 import type { StructuredCaller } from '../../../agents/structured-caller.js';
 import type { PhaseRunnerContext } from '../phase-runner.js';
@@ -160,6 +160,7 @@ export class OptionsBuilder {
       allowedTools,
       mcpServers: resolveMcpServersForProvider(step.mcpServers, resolvedProvider),
       outputSchema: supportsStructuredOutput === false ? undefined : step.structuredOutput?.schema,
+      maxTurns: (step as AgentWorkflowStep).maxTurns,
     };
   }
 
