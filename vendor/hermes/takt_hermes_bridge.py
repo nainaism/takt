@@ -123,7 +123,8 @@ def handle_setup(params: Dict[str, Any]) -> Dict[str, Any]:
         logger.debug("Skipping empty setup — will wait for real setup call")
         return {"status": "ok", "sessionId": None}
     _agent_config = params
-    logger.debug("Creating AIAgent...")
+    max_turns = params.get("maxTurns", "(not set)")
+    logger.debug("Creating AIAgent with maxTurns=%s, model=%s, cwd=%s", max_turns, params.get("model"), params.get("cwd"))
     _agent = _create_agent(params)
     logger.debug("AIAgent created: session_id=%s, model=%s", 
                  getattr(_agent, 'session_id', None),
