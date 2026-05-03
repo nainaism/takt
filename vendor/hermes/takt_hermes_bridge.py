@@ -89,6 +89,7 @@ def _create_agent(config: Dict[str, Any]) -> Any:
         provider=config.get("provider"),
         base_url=config.get("baseUrl"),
         api_key=config.get("apiKey"),
+        cwd=config.get("cwd"),  # Project working directory
         quiet_mode=True,  # Required — suppress spinner/banner
         ephemeral_system_prompt=config.get("systemPrompt", ""),
         skip_context_files=True,  # Prevent AGENTS.md double-loading

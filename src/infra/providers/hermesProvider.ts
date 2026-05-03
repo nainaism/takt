@@ -52,6 +52,7 @@ export class HermesProvider implements Provider {
           sessionId: options.sessionId,
           model: options.model,
           maxTurns: options.maxTurns,
+          cwd: options.cwd,  // Project working directory
         });
 
         // Execute the call — pass abortSignal for cancellation (#2)

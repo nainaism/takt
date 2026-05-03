@@ -44,6 +44,7 @@ export interface BridgeSetupParams {
   maxTurns?: number;
   baseUrl?: string;
   apiKey?: string;
+  cwd?: string;
 }
 
 export interface BridgeCallParams {
