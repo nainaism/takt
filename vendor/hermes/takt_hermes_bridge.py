@@ -98,7 +98,7 @@ def _create_agent(config: Dict[str, Any]) -> Any:
         ephemeral_system_prompt=config.get("systemPrompt", ""),
         skip_context_files=True,  # Prevent AGENTS.md double-loading
         skip_memory=True,  # Prevent cross-task memory leaking
-        max_iterations=config.get("maxTurns", 20),
+        max_iterations=config.get("maxTurns", 5),
         enabled_toolsets=enabled_toolsets if enabled_toolsets else None,
         disabled_toolsets=disabled_toolsets if disabled_toolsets else None,
         platform="takt",  # Identify as TAKT-sourced
