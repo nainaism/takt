@@ -116,6 +116,7 @@ export class HermesBridge {
   private pending: Map<number, PendingEntry> = new Map();
   private buffer = '';
   private initialized = false;
+  private _projectCwd: string | undefined;
   /** Guard against double-spawn race condition (#3) */
   private startingPromise: Promise<void> | null = null;
 
@@ -162,10 +163,12 @@ export class HermesBridge {
 
     this.process = spawn(python, [script], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: this._projectCwd || process.cwd(),
       env: {
         ...process.env,
         HOME: process.env.HOME || '/Users/nainai',
         HERMES_HOME: hermesHome,
+        TERMINAL_CWD: this._projectCwd || process.cwd(),
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8',
       },
@@ -211,6 +214,9 @@ export class HermesBridge {
   // ---------------------------------------------------------------------------
 
   async setup(params: BridgeSetupParams): Promise<BridgeCallResult> {
+    if (params.cwd) {
+      this._projectCwd = params.cwd;
+    }
     await this.ensureProcess();
     return this.callInternal('setup', params as unknown as Record<string, unknown>);
   }
