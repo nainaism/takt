@@ -156,11 +156,15 @@ export class HermesBridge {
     const python = this.resolvePython();
     const script = this.resolveScript();
     console.error(`[hermes-bridge] Spawning: ${python} ${script}`);
+    // Set HERMES_HOME to CTO profile so AIAgent uses CTO config (model, provider, api keys)
+    const hermesHome = resolve(process.env.HOME || '/Users/nainai', '.hermes', 'profiles', 'cto');
 
     this.process = spawn(python, [script], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        HOME: process.env.HOME || '/Users/nainai',
+        HERMES_HOME: hermesHome,
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8',
       },

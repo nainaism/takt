@@ -21,7 +21,7 @@ from takt_guard import get_tool_config
 
 # Configure logging to stderr (stdout is for JSON protocol)
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.DEBUG,
     format="%(asctime)s [takt-bridge] %(levelname)s: %(message)s",
     stream=sys.stderr,
 )
@@ -110,8 +110,15 @@ def _create_agent(config: Dict[str, Any]) -> Any:
 def handle_setup(params: Dict[str, Any]) -> Dict[str, Any]:
     """Initialize or reinitialize the AIAgent."""
     global _agent, _agent_config
+    logger.debug("handle_setup called with params: model=%s, provider=%s, name=%s, sessionId=%s",
+                 params.get("model", "(empty)"), params.get("provider", "(empty)"),
+                 params.get("name", "(empty)"), params.get("sessionId", "(empty)"))
     _agent_config = params
+    logger.debug("Creating AIAgent...")
     _agent = _create_agent(params)
+    logger.debug("AIAgent created: session_id=%s, model=%s", 
+                 getattr(_agent, 'session_id', None),
+                 getattr(_agent, 'model', 'N/A'))
     return {
         "status": "ok",
         "sessionId": _agent.session_id if _agent else None,
