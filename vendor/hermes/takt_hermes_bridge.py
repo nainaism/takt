@@ -84,12 +84,16 @@ def _create_agent(config: Dict[str, Any]) -> Any:
         extra_disabled=extra_disabled if extra_disabled else None,
     )
 
+    # Set TERMINAL_CWD so agent tools use the project directory
+    project_cwd = config.get("cwd")
+    if project_cwd:
+        os.environ["TERMINAL_CWD"] = project_cwd
+
     agent = AIAgent(
         model=config.get("model", ""),
         provider=config.get("provider"),
         base_url=config.get("baseUrl"),
         api_key=config.get("apiKey"),
-        cwd=config.get("cwd"),  # Project working directory
         quiet_mode=True,  # Required — suppress spinner/banner
         ephemeral_system_prompt=config.get("systemPrompt", ""),
         skip_context_files=True,  # Prevent AGENTS.md double-loading
