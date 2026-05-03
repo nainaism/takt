@@ -98,7 +98,6 @@ def _create_agent(config: Dict[str, Any]) -> Any:
         disabled_toolsets=disabled_toolsets if disabled_toolsets else None,
         platform="takt",  # Identify as TAKT-sourced
         session_id=config.get("sessionId"),
-        persist_session=False,  # TAKT manages sessions; prevent cross-task context leak
     )
     return agent
 
